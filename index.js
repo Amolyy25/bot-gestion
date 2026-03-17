@@ -32,6 +32,7 @@ const client = new Client({
 
 const PREFIX = process.env.PREFIX || '-';
 const ROLES_FILE = path.join(__dirname, 'soumis_roles.json');
+const spamMap = new Collection();
 
 // Ensure roles file exists
 if (!fs.existsSync(ROLES_FILE)) {
@@ -90,7 +91,45 @@ client.on('guildMemberAdd', async (member) => {
 
 client.on('messageCreate', async (message) => {
     try {
-        if (message.author.bot || !message.content.startsWith(PREFIX)) return;
+    if (message.author.bot) return;
+
+    // --- ANTI-RAID SYSTEM ---
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+        // 1. Anti-Invite
+        const inviteRegex = /(discord\.(gg|io|me|li)|discordapp\.com\/invite)\/.+/i;
+        if (inviteRegex.test(message.content)) {
+            await message.delete().catch(() => {});
+            await message.member.ban({ reason: 'Anti-Raid : Invitation Discord' }).catch(() => {});
+            const embed = new EmbedBuilder()
+                .setColor(0xFFFFFF)
+                .setDescription(`${message.author.tag} a été banni pour envoi d'invitation (Anti-Raid).`);
+            return message.channel.send({ embeds: [embed] });
+        }
+
+        // 2. Anti-Spam
+        const now = Date.now();
+        const userData = spamMap.get(message.author.id) || { count: 0, lastMessage: now };
+        
+        if (now - userData.lastMessage < 2000) {
+            userData.count++;
+        } else {
+            userData.count = 1;
+        }
+        userData.lastMessage = now;
+        spamMap.set(message.author.id, userData);
+
+        if (userData.count > 5) {
+            await message.member.ban({ reason: 'Anti-Raid : Spam' }).catch(() => {});
+            spamMap.delete(message.author.id);
+            const embed = new EmbedBuilder()
+                .setColor(0xFFFFFF)
+                .setDescription(`${message.author.tag} a été banni pour spam (Anti-Raid).`);
+            return message.channel.send({ embeds: [embed] });
+        }
+    }
+    // ------------------------
+
+    if (!message.content.startsWith(PREFIX)) return;
 
     const args = message.content.slice(PREFIX.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();

@@ -156,6 +156,62 @@ client.on('inviteDelete', (invite) => {
     if (invites) invites.delete(invite.code);
 });
 
+const LOG_CHANNEL_ID = '1483480300112842874';
+
+const logToDiscord = async (title, description, fields = [], color = 0xFFFFFF) => {
+    try {
+        const guild = client.guilds.cache.first();
+        if (!guild) return;
+        const channel = await guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+        if (channel) {
+            const embed = new EmbedBuilder()
+                .setTitle(title)
+                .setDescription(description)
+                .addFields(fields)
+                .setColor(color)
+                .setTimestamp();
+            await channel.send({ embeds: [embed] });
+        }
+    } catch (err) {
+        console.error('Erreur de logging:', err);
+    }
+};
+
+client.on('messageDelete', async (message) => {
+    if (message.author?.bot) return;
+    logToDiscord(
+        '🗑️ Message Supprimé',
+        `Un message de ${message.author || 'Inconnu'} a été supprimé dans ${message.channel}.`,
+        [
+            { name: 'Contenu', value: message.content || '*Contenu non textuel*' }
+        ],
+        0xFF0000
+    );
+});
+
+client.on('guildMemberRemove', async (member) => {
+    logToDiscord(
+        '📤 Départ du Serveur',
+        `${member.user.tag} (${member.id}) vient de quitter le serveur.`,
+        [],
+        0xFFA500
+    );
+});
+
+client.on('guildMemberUpdate', async (oldMember, newMember) => {
+    const addedRoles = newMember.roles.cache.filter(role => !oldMember.roles.cache.has(role.id));
+    if (addedRoles.size > 0) {
+        addedRoles.forEach(role => {
+            logToDiscord(
+                '🎭 Rôle Ajouté',
+                `Le rôle **${role.name}** a été ajouté à ${newMember.user.tag}.`,
+                [],
+                0x00FF00
+            );
+        });
+    }
+});
+
 client.on('guildMemberAdd', async (member) => {
     const channelId = '1483532401404543077';
     const channel = member.guild.channels.cache.get(channelId);
@@ -436,6 +492,7 @@ client.on('messageCreate', async (message) => {
             .setColor(0xFFFFFF)
             .setDescription(`${target.user.tag} a été banni rapidement.`);
         message.channel.send({ embeds: [embed] });
+        logToDiscord('🔨 Sanction : Ban Rapide', `${target.user.tag} a été banni par ${message.author}.`, [], 0xFF0000);
     }
 
     // Command: -clear
@@ -452,6 +509,7 @@ client.on('messageCreate', async (message) => {
             .setDescription(`${amount} messages supprimés.`);
         const msg = await message.channel.send({ embeds: [embed] });
         setTimeout(() => msg.delete(), 3000);
+        logToDiscord('🧹 Nettoyage', `${amount} messages ont été supprimés par ${message.author} dans ${message.channel}.`, [], 0x00FFFF);
     }
 
     // Command: -tempmute
@@ -491,6 +549,7 @@ client.on('messageCreate', async (message) => {
             .setColor(0xFFFFFF)
             .setDescription(`${target.user.tag} a été mute pour 24 heures.`);
         message.channel.send({ embeds: [embed] });
+        logToDiscord('🔇 Sanction : Mute 24h', `${target.user.tag} a été mute par ${message.author}.`, [], 0xFFFF00);
     }
 
     // Command: -soumis
@@ -869,18 +928,21 @@ client.on('interactionCreate', async (interaction) => {
             if (action === 'mute') {
                 const duration = parseInt(interaction.values[0]);
                 await target.timeout(duration);
+                logToDiscord('🔇 Sanction : Timeout', `${target.user.tag} a été mute (Durée: ${duration/1000/60}min) par ${interaction.user.tag}.`, [], 0xFFFF00);
                 return await interaction.update({ content: `${target.user.tag} a été mute.`, embeds: [], components: [] });
             }
 
             if (action === 'kick') {
                 const reason = interaction.values[0];
                 await target.kick(reason);
+                logToDiscord('👢 Sanction : Kick', `${target.user.tag} a été kick par ${interaction.user.tag} (Raison: ${reason}).`, [], 0xFFA500);
                 return await interaction.update({ content: `${target.user.tag} a été kick (Raison: ${reason}).`, embeds: [], components: [] });
             }
 
             if (action === 'ban') {
                 const reason = interaction.values[0];
                 await target.ban({ reason });
+                logToDiscord('🔨 Sanction : Ban', `${target.user.tag} a été banni par ${interaction.user.tag} (Raison: ${reason}).`, [], 0xFF0000);
                 return await interaction.update({ content: `${target.user.tag} a été banni (Raison: ${reason}).`, embeds: [], components: [] });
             }
         }

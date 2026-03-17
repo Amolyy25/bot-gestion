@@ -288,13 +288,17 @@ client.on('messageCreate', async (message) => {
             });
         }
 
-        // Save current roles
+        // Save current roles and nickname
         const rolesData = JSON.parse(fs.readFileSync(ROLES_FILE, 'utf8'));
-        rolesData[target.id] = target.roles.cache.filter(r => r.name !== '@everyone').map(r => r.id);
+        rolesData[target.id] = {
+            roles: target.roles.cache.filter(r => r.name !== '@everyone').map(r => r.id),
+            nickname: target.nickname || null
+        };
         fs.writeFileSync(ROLES_FILE, JSON.stringify(rolesData, null, 2));
 
-        // Remove all roles and add soumis
+        // Remove all roles, add soumis, and change nickname
         await target.roles.set([soumisRole.id]);
+        await target.setNickname(`Soumis de ${message.author.username}`).catch(() => {});
 
         message.channel.send(`${target} est maintenant le soumis de ${message.author}`);
     }
@@ -306,11 +310,19 @@ client.on('messageCreate', async (message) => {
         if (!target) return message.reply('Veuillez mentionner un utilisateur ou donner son ID.');
 
         const rolesData = JSON.parse(fs.readFileSync(ROLES_FILE, 'utf8'));
-        const oldRoles = rolesData[target.id];
+        const oldData = rolesData[target.id];
 
-        if (!oldRoles) return message.reply('Aucun ancien rôle trouvé pour cet utilisateur.');
+        if (!oldData) return message.reply('Aucun ancien rôle trouvé pour cet utilisateur.');
 
-        await target.roles.set(oldRoles);
+        // Support for old data format (array) and new format (object)
+        const rolesToRestore = Array.isArray(oldData) ? oldData : oldData.roles;
+        const nicknameToRestore = Array.isArray(oldData) ? null : oldData.nickname;
+
+        await target.roles.set(rolesToRestore);
+        if (nicknameToRestore !== undefined) {
+            await target.setNickname(nicknameToRestore).catch(() => {});
+        }
+        
         delete rolesData[target.id];
         fs.writeFileSync(ROLES_FILE, JSON.stringify(rolesData, null, 2));
 

@@ -232,6 +232,10 @@ input:focus, select:focus {
     border: none;
     padding: 0;
     box-shadow: none;
+    width: 100%;
+    font-size: 15px;
+    outline: none;
+    background: transparent;
 }
 
 .cvc-row {

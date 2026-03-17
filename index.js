@@ -26,21 +26,50 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildInvites,
     ],
     partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
 const PREFIX = process.env.PREFIX || '-';
 const ROLES_FILE = path.join(__dirname, 'soumis_roles.json');
+const INVITES_FILE = path.join(__dirname, 'invites.json');
 const spamMap = new Collection();
+const guildInvites = new Collection();
 
-// Ensure roles file exists
+// Ensure files exist
 if (!fs.existsSync(ROLES_FILE)) {
     fs.writeFileSync(ROLES_FILE, JSON.stringify({}));
 }
+if (!fs.existsSync(INVITES_FILE)) {
+    fs.writeFileSync(INVITES_FILE, JSON.stringify({}));
+}
 
-client.once('clientReady', (c) => {
-    console.log(`Bot prêt ! Connecté en tant que ${c.user.tag}`);
+client.once('ready', async () => {
+    console.log(`Bot prêt ! Connecté en tant que ${client.user.tag}`);
+    // Fetch all invites for all guilds
+    for (const guild of client.guilds.cache.values()) {
+        try {
+            const firstInvites = await guild.invites.fetch();
+            const invitesMap = new Collection();
+            firstInvites.forEach(i => {
+                invitesMap.set(i.code, { uses: i.uses, inviterId: i.inviter?.id });
+            });
+            guildInvites.set(guild.id, invitesMap);
+        } catch (err) {
+            console.log(`Impossible de récupérer les invitations pour ${guild.id}`);
+        }
+    }
+});
+
+client.on('inviteCreate', (invite) => {
+    const invites = guildInvites.get(invite.guild.id);
+    if (invites) invites.set(invite.code, { uses: invite.uses, inviterId: invite.inviter?.id });
+});
+
+client.on('inviteDelete', (invite) => {
+    const invites = guildInvites.get(invite.guild.id);
+    if (invites) invites.delete(invite.code);
 });
 
 // Centralized Error Logger
@@ -73,6 +102,73 @@ process.on('uncaughtException', error => logError(error, 'Uncaught Exception'));
 
 client.on('guildMemberAdd', async (member) => {
     try {
+        // Invite tracking logic
+        const cachedInvites = guildInvites.get(member.guild.id);
+        const newInvites = await member.guild.invites.fetch().catch(() => null);
+        
+        let inviterId = null;
+        if (cachedInvites && newInvites) {
+            const usedInvite = newInvites.find(i => cachedInvites.has(i.code) && cachedInvites.get(i.code).uses < i.uses);
+            
+            if (usedInvite) {
+                inviterId = usedInvite.inviter?.id;
+            } else {
+                // Check if an invite was deleted (likely 1-use invite)
+                const missingCode = Array.from(cachedInvites.keys()).find(code => !newInvites.has(code));
+                if (missingCode) {
+                    inviterId = cachedInvites.get(missingCode).inviterId;
+                }
+            }
+
+            // Update cache
+            const newInvitesMap = new Collection();
+            newInvites.forEach(i => newInvitesMap.set(i.code, { uses: i.uses, inviterId: i.inviter?.id }));
+            guildInvites.set(member.guild.id, newInvitesMap);
+
+            if (inviterId) {
+                const invitesData = JSON.parse(fs.readFileSync(INVITES_FILE, 'utf8'));
+                if (!invitesData[inviterId]) invitesData[inviterId] = [];
+                // Eviter les duplicatas si l'event se repete bizarrement
+                if (!invitesData[inviterId].includes(member.id)) {
+                    invitesData[inviterId].push(member.id);
+                    fs.writeFileSync(INVITES_FILE, JSON.stringify(invitesData, null, 2));
+
+                    // Check active invites count
+                    let activeCount = 0;
+                    for (const invitedId of invitesData[inviterId]) {
+                        try {
+                            const isPresent = member.guild.members.cache.has(invitedId) || await member.guild.members.fetch(invitedId).catch(() => null);
+                            if (isPresent) activeCount++;
+                        } catch {}
+                    }
+
+                    if (activeCount === 3) {
+                        const inviterUser = await client.users.fetch(inviterId).catch(() => null);
+                        if (inviterUser) {
+                            const dmEmbed = new EmbedBuilder()
+                                .setColor(0xFFFFFF)
+                                .setTitle('Objectif atteint')
+                                .setDescription('Félicitations ! Vous avez atteint **3 invitations** sur le serveur. Vous pouvez désormais ouvrir un ticket pour réclamer votre récompense.');
+                            
+                            try {
+                                await inviterUser.send({ embeds: [dmEmbed] });
+                            } catch {
+                                // DM closed, ping in welcome channel
+                                const welcomeChannelId = '1483231963308494920';
+                                const channel = member.guild.channels.cache.get(welcomeChannelId);
+                                if (channel) {
+                                    const chatEmbed = new EmbedBuilder()
+                                        .setColor(0xFFFFFF)
+                                        .setDescription(`Bravo ${inviterUser}, tu as atteint **3 invitations** ! Tes messages privés sont fermés, je t'invite donc à créer un ticket pour ta récompense.`);
+                                    await channel.send({ content: `${inviterUser}`, embeds: [chatEmbed] });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         const welcomeChannelId = '1483231963308494920';
         const channel = member.guild.channels.cache.get(welcomeChannelId);
         
@@ -467,6 +563,27 @@ client.on('messageCreate', async (message) => {
         message.channel.send({ embeds: [embed] });
     }
 
+    // Command: -invites
+    if (command === 'invites') {
+        const target = (await getMember(args[0])) || message.member;
+        const invitesData = JSON.parse(fs.readFileSync(INVITES_FILE, 'utf8'));
+        const invitedList = invitesData[target.id] || [];
+        
+        let count = 0;
+        for (const id of invitedList) {
+            try {
+                const isPresent = message.guild.members.cache.has(id) || await message.guild.members.fetch(id).catch(() => null);
+                if (isPresent) count++;
+            } catch {}
+        }
+        
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle(`Invitations de ${target.user.tag}`)
+            .setDescription(`Cet utilisateur possède **${count}** invitation${count > 1 ? 's' : ''} (membres actuellement sur le serveur).`);
+        message.channel.send({ embeds: [embed] });
+    }
+
     // Command: -create
     if (command === 'create') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
@@ -500,7 +617,7 @@ client.on('messageCreate', async (message) => {
             .addFields(
                 { name: 'Administration', value: '`-setupticket`, `-kick`, `-ban`, `-bban`, `-clear`, `-tempmute`, `-mmute`, `-lock`, `-unlock`, `-slowmode`' },
                 { name: 'Système Soumis', value: '`-soumis @user`, `-unsoumis @user`' },
-                { name: 'Utilitaire', value: '`-pic`, `-banner`, `-userinfo`, `-serverinfo`, `-ping`' }
+                { name: 'Utilitaire', value: '`-pic`, `-banner`, `-userinfo`, `-serverinfo`, `-ping`, `-invites @user`' }
             );
         message.channel.send({ embeds: [embed] });
     }

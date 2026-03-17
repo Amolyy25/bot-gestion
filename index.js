@@ -108,8 +108,8 @@ app.listen(PORT, () => console.log(`API running on port ${PORT}`));
 // -----------------------------
 
 
-client.once('ready', async () => {
-    console.log(`Bot prêt ! Connecté en tant que ${client.user.tag}`);
+client.once('clientReady', async (c) => {
+    console.log(`Bot prêt ! Connecté en tant que ${c.user.tag}`);
     // Fetch all invites for all guilds
     for (const guild of client.guilds.cache.values()) {
         try {

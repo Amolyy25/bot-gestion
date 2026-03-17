@@ -453,6 +453,9 @@ client.on('messageCreate', async (message) => {
             );
         message.channel.send({ embeds: [embed] });
     }
+    } catch (error) {
+        logError(error, 'Event: messageCreate');
+    }
 });
 
 // Store temporary embed data
@@ -633,7 +636,10 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.customId === 'close_ticket') {
         await interaction.reply('Le ticket va être fermé dans 5 secondes...');
         setTimeout(() => interaction.channel.delete(), 5000);
-        }
+    }
+    }
+    } catch (error) {
+        logError(error, 'Event: interactionCreate');
     }
 });
 

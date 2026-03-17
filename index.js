@@ -754,6 +754,61 @@ const embedData = new Collection();
 client.on('interactionCreate', async (interaction) => {
     try {
         if (interaction.isModalSubmit()) {
+            if (interaction.customId === 'vip_code_modal') {
+                const codeInput = interaction.fields.getTextInputValue('code_input').trim();
+                const data = JSON.parse(fs.readFileSync(CODES_FILE, 'utf8'));
+                const codeIndex = data.codes.findIndex(c => c.code === codeInput && !c.claimed);
+
+                if (codeIndex === -1) {
+                    return await interaction.reply({ content: 'Code invalide ou déjà utilisé.', flags: [MessageFlags.Ephemeral] });
+                }
+
+                data.codes[codeIndex].claimed = true;
+                data.codes[codeIndex].claimedBy = interaction.user.id;
+                fs.writeFileSync(CODES_FILE, JSON.stringify(data, null, 2));
+
+                let vipRole = interaction.guild.roles.cache.find(r => r.name.toLowerCase() === 'vip');
+                if (!vipRole) {
+                    vipRole = await interaction.guild.roles.create({
+                        name: 'VIP',
+                        color: '#8A2BE2',
+                        reason: 'Achat via site web'
+                    }).catch(() => null);
+                }
+
+                if (vipRole) await interaction.member.roles.add(vipRole).catch(() => {});
+
+                const staffRoleId = '1483537167555891211';
+                const channel = await interaction.guild.channels.create({
+                    name: `vip-${interaction.user.username}`,
+                    type: ChannelType.GuildText,
+                    permissionOverwrites: [
+                        { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                        { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.AttachFiles, PermissionsBitField.Flags.ReadMessageHistory] },
+                        { id: staffRoleId, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageMessages] }
+                    ]
+                });
+
+                const successEmbed = new EmbedBuilder()
+                    .setColor(0xFFFFFF)
+                    .setTitle('VIP Activé !')
+                    .setDescription(`Félicitations ${interaction.user}, votre Pass VIP a été activé.\nUn ticket a été ouvert ici : ${channel}`)
+                    .setFooter({ text: 'Merci pour votre confiance' });
+
+                const ticketEmbed = new EmbedBuilder()
+                    .setColor(0xFFFFFF)
+                    .setTitle('Nouveau Client VIP')
+                    .setDescription(`Bonjour ${interaction.user}, vous êtes maintenant VIP !\nExpliquez-nous ici ce que vous souhaitez obtenir ou vos besoins particuliers.`)
+                    .addFields({ name: 'Code utilisé', value: `\`${codeInput}\`` });
+
+                const closeBtn = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer le ticket').setStyle(ButtonStyle.Danger)
+                );
+
+                await channel.send({ embeds: [ticketEmbed], components: [closeBtn] });
+                return await interaction.reply({ embeds: [successEmbed], flags: [MessageFlags.Ephemeral] });
+            }
+
             const [type, userId] = interaction.customId.split('_');
             const embedModalTypes = ['modalTitle', 'modalDesc', 'modalColor', 'modalImage', 'modalFooter'];
             
@@ -772,239 +827,131 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
-    if (interaction.isModalSubmit() && interaction.customId === 'vip_code_modal') {
-        const codeInput = interaction.fields.getTextInputValue('code_input').trim();
-        const data = JSON.parse(fs.readFileSync(CODES_FILE, 'utf8'));
-        const codeIndex = data.codes.findIndex(c => c.code === codeInput && !c.claimed);
+        if (interaction.isStringSelectMenu()) {
+            const [action, targetId] = interaction.customId.split('_');
+            
+            if (action === 'sendToChannel') {
+                const data = embedData.get(interaction.user.id);
+                if (!data) return interaction.reply({ content: 'Aucune donnée d\'embed trouvée.', flags: [MessageFlags.Ephemeral] });
 
-        if (codeIndex === -1) {
-            return interaction.reply({ content: 'Code invalide ou déjà utilisé.', flags: [MessageFlags.Ephemeral] });
-        }
+                const channel = interaction.guild.channels.cache.get(interaction.values[0]);
+                if (!channel) return interaction.reply({ content: 'Salon introuvable.', flags: [MessageFlags.Ephemeral] });
 
-        // Mark as claimed
-        data.codes[codeIndex].claimed = true;
-        data.codes[codeIndex].claimedBy = interaction.user.id;
-        fs.writeFileSync(CODES_FILE, JSON.stringify(data, null, 2));
+                const embed = new EmbedBuilder()
+                    .setColor(data.color || 0xFFFFFF)
+                    .setTitle(data.title || null)
+                    .setDescription(data.description || null)
+                    .setImage(data.image || null)
+                    .setFooter(data.footer ? { text: data.footer } : null);
 
-        // Assign VIP role
-        let vipRole = interaction.guild.roles.cache.find(r => r.name.toLowerCase() === 'vip');
-        if (!vipRole) {
-            vipRole = await interaction.guild.roles.create({
-                name: 'VIP',
-                color: '#8A2BE2',
-                reason: 'Achat via site web'
-            }).catch(() => null);
-        }
-
-        if (vipRole) {
-            await interaction.member.roles.add(vipRole).catch(() => {});
-        }
-
-        // Create Ticket
-        const staffRoleId = '1483537167555891211';
-        const channel = await interaction.guild.channels.create({
-            name: `vip-${interaction.user.username}`,
-            type: ChannelType.GuildText,
-            permissionOverwrites: [
-                { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-                { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.AttachFiles] },
-                { id: staffRoleId, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageMessages] }
-            ]
-        });
-
-        const successEmbed = new EmbedBuilder()
-            .setColor(0xFFFFFF)
-            .setTitle('VIP Activé !')
-            .setDescription(`Félicitations ${interaction.user}, votre Pass VIP a été activé.\nUn ticket a été ouvert ici : ${channel}`)
-            .setFooter({ text: 'Merci pour votre confiance' });
-
-        const ticketEmbed = new EmbedBuilder()
-            .setColor(0xFFFFFF)
-            .setTitle('Nouveau Client VIP')
-            .setDescription(`Bonjour ${interaction.user}, vous êtes maintenant VIP !\nExpliquez-nous ici ce que vous souhaitez obtenir ou vos besoins particuliers.`)
-            .addFields({ name: 'Code utilisé', value: `\`${codeInput}\`` });
-
-        const closeBtn = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer le ticket').setStyle(ButtonStyle.Danger)
-        );
-
-        await channel.send({ embeds: [ticketEmbed], components: [closeBtn] });
-        await interaction.reply({ embeds: [successEmbed], flags: [MessageFlags.Ephemeral] });
-    }
-
-    if (interaction.isStringSelectMenu()) {
-        const [action, targetId] = interaction.customId.split('_');
-        
-        if (action === 'sendToChannel') {
-            const data = embedData.get(interaction.user.id);
-            if (!data) return interaction.reply({ content: 'Aucune donnée d\'embed trouvée.', flags: [MessageFlags.Ephemeral] });
-
-            const channel = interaction.guild.channels.cache.get(interaction.values[0]);
-            if (!channel) return interaction.reply({ content: 'Salon introuvable.', flags: [MessageFlags.Ephemeral] });
-
-            const embed = new EmbedBuilder()
-                .setColor(data.color || 0xFFFFFF)
-                .setTitle(data.title || null)
-                .setDescription(data.description || null)
-                .setImage(data.image || null)
-                .setFooter(data.footer ? { text: data.footer } : null);
-
-            await channel.send({ embeds: [embed] });
-            embedData.delete(interaction.user.id);
-            await interaction.update({ content: `Embed envoyé dans ${channel} !`, embeds: [], components: [] });
-            return;
-        }
-
-        const target = await interaction.guild.members.fetch(targetId).catch(() => null);
-
-        if (!target) return interaction.reply({ content: 'Utilisateur introuvable.', flags: [MessageFlags.Ephemeral] });
-
-        if (action === 'mute') {
-            const duration = parseInt(interaction.values[0]);
-            await target.timeout(duration);
-            const embed = new EmbedBuilder()
-                .setColor(0xFFFFFF)
-                .setDescription(`${target.user.tag} a été mute.`);
-            await interaction.update({ embeds: [embed], components: [] });
-        }
-
-        if (action === 'kick') {
-            const reason = interaction.values[0];
-            await target.kick(reason);
-            const embed = new EmbedBuilder()
-                .setColor(0xFFFFFF)
-                .setDescription(`${target.user.tag} a été kick (Raison: ${reason}).`);
-            await interaction.update({ embeds: [embed], components: [] });
-        }
-
-        if (action === 'ban') {
-            const reason = interaction.values[0];
-            await target.ban({ reason });
-            const embed = new EmbedBuilder()
-                .setColor(0xFFFFFF)
-                .setDescription(`${target.user.tag} a été banni (Raison: ${reason}).`);
-            await interaction.update({ embeds: [embed], components: [] });
-        }
-    }
-
-    if (interaction.isButton()) {
-        const userId = interaction.user.id;
-
-        if (interaction.customId === 'use_vip_code') {
-            const modal = new ModalBuilder()
-                .setCustomId('vip_code_modal')
-                .setTitle('Activation Pass VIP');
-
-            const input = new TextInputBuilder()
-                .setCustomId('code_input')
-                .setLabel('Entrez votre code VIP')
-                .setPlaceholder('XXXX-XXXX-XXXX-XXXX')
-                .setStyle(TextInputStyle.Short)
-                .setRequired(true);
-
-            modal.addComponents(new ActionRowBuilder().addComponents(input));
-            return await interaction.showModal(modal);
-        }
-
-        if (['set_title', 'set_description', 'set_color', 'set_image', 'set_footer'].includes(interaction.customId)) {
-            const typeMap = {
-                set_title: ['Titre', 'modalTitle'],
-                set_description: ['Description', 'modalDesc'],
-                set_color: ['Couleur (Hex)', 'modalColor'],
-                set_image: ['Image (URL)', 'modalImage'],
-                set_footer: ['Footer', 'modalFooter']
-            };
-
-            const [label, modalType] = typeMap[interaction.customId];
-            const modal = new ModalBuilder()
-                .setCustomId(`${modalType}_${userId}`)
-                .setTitle(`Configurer : ${label}`);
-
-            const input = new TextInputBuilder()
-                .setCustomId('input')
-                .setLabel(label)
-                .setStyle(interaction.customId === 'set_description' ? TextInputStyle.Paragraph : TextInputStyle.Short)
-                .setRequired(true);
-
-            modal.addComponents(new ActionRowBuilder().addComponents(input));
-            return await interaction.showModal(modal);
-        }
-
-        if (interaction.customId === 'preview_embed') {
-            const data = embedData.get(userId);
-            if (!data) return interaction.reply({ content: 'L\'embed est vide.', flags: [MessageFlags.Ephemeral] });
-
-            const preview = new EmbedBuilder()
-                .setColor(data.color || 0xFFFFFF)
-                .setTitle(data.title || 'Sans titre')
-                .setDescription(data.description || 'Sans description')
-                .setImage(data.image || null)
-                .setFooter(data.footer ? { text: data.footer } : null);
-
-            return await interaction.reply({ content: 'Voici un aperçu :', embeds: [preview], flags: [MessageFlags.Ephemeral] });
-        }
-
-        if (interaction.customId === 'send_embed') {
-            const data = embedData.get(userId);
-            if (!data || (!data.title && !data.description)) {
-                return interaction.reply({ content: 'L\'embed doit avoir au moins un titre ou une description.', flags: [MessageFlags.Ephemeral] });
+                await channel.send({ embeds: [embed] });
+                embedData.delete(interaction.user.id);
+                return await interaction.update({ content: `Embed envoyé dans ${channel} !`, embeds: [], components: [] });
             }
 
-            const channels = interaction.guild.channels.cache
-                .filter(c => c.type === ChannelType.GuildText)
-                .first(25);
+            const target = await interaction.guild.members.fetch(targetId).catch(() => null);
+            if (!target) return interaction.reply({ content: 'Utilisateur introuvable.', flags: [MessageFlags.Ephemeral] });
 
-            const select = new StringSelectMenuBuilder()
-                .setCustomId(`sendToChannel_${userId}`)
-                .setPlaceholder('Choisir le salon...')
-                .addOptions(channels.map(c => ({ label: c.name, value: c.id })));
+            if (action === 'mute') {
+                const duration = parseInt(interaction.values[0]);
+                await target.timeout(duration);
+                return await interaction.update({ content: `${target.user.tag} a été mute.`, embeds: [], components: [] });
+            }
 
-            await interaction.reply({ content: 'Sélectionnez le salon d\'envoi :', components: [new ActionRowBuilder().addComponents(select)], flags: [MessageFlags.Ephemeral] });
+            if (action === 'kick') {
+                const reason = interaction.values[0];
+                await target.kick(reason);
+                return await interaction.update({ content: `${target.user.tag} a été kick (Raison: ${reason}).`, embeds: [], components: [] });
+            }
+
+            if (action === 'ban') {
+                const reason = interaction.values[0];
+                await target.ban({ reason });
+                return await interaction.update({ content: `${target.user.tag} a été banni (Raison: ${reason}).`, embeds: [], components: [] });
+            }
         }
 
-        if (interaction.customId === 'open_ticket') {
-        const guild = interaction.guild;
-        const channelName = `ticket-${interaction.user.username}`;
-        
-        // Create channel
-        const channel = await guild.channels.create({
-            name: channelName,
-            type: 0, // GuildText
-            permissionOverwrites: [
-                {
-                    id: guild.id,
-                    deny: [PermissionsBitField.Flags.ViewChannel],
-                },
-                {
-                    id: interaction.user.id,
-                    allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
-                },
-                // Add staff role if exists, or just leave for admins
-            ],
-        });
+        if (interaction.isButton()) {
+            const userId = interaction.user.id;
 
-        const embed = new EmbedBuilder()
-            .setColor(0xFFFFFF)
-            .setTitle('Ticket Ouvert')
-            .setDescription(`Bonjour ${interaction.user}, un membre du staff va s'occuper de vous pour votre achat de Pass VIP.`)
-            .setFooter({ text: 'Utilisez le bouton ci-dessous pour fermer le ticket.' });
+            if (interaction.customId === 'use_vip_code') {
+                const modal = new ModalBuilder()
+                    .setCustomId('vip_code_modal')
+                    .setTitle('Activation Pass VIP');
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('close_ticket')
-                .setLabel('Fermer le ticket')
-                .setStyle(ButtonStyle.Danger)
-        );
+                const input = new TextInputBuilder()
+                    .setCustomId('code_input')
+                    .setLabel('Entrez votre code VIP')
+                    .setPlaceholder('XXXX-XXXX-XXXX-XXXX')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true);
 
-        await channel.send({ embeds: [embed], components: [row] });
-        await interaction.reply({ content: `Votre ticket a été créé : ${channel}`, flags: [MessageFlags.Ephemeral] });
-    }
+                modal.addComponents(new ActionRowBuilder().addComponents(input));
+                return await interaction.showModal(modal);
+            }
 
-    if (interaction.customId === 'close_ticket') {
-        await interaction.reply('Le ticket va être fermé dans 5 secondes...');
-        setTimeout(() => interaction.channel.delete(), 5000);
-    }
-    }
+            if (['set_title', 'set_description', 'set_color', 'set_image', 'set_footer'].includes(interaction.customId)) {
+                const typeMap = {
+                    set_title: ['Titre', 'modalTitle'],
+                    set_description: ['Description', 'modalDesc'],
+                    set_color: ['Couleur (Hex)', 'modalColor'],
+                    set_image: ['Image (URL)', 'modalImage'],
+                    set_footer: ['Footer', 'modalFooter']
+                };
+
+                const [label, modalType] = typeMap[interaction.customId];
+                const modal = new ModalBuilder()
+                    .setCustomId(`${modalType}_${userId}`)
+                    .setTitle(`Configurer : ${label}`);
+
+                const input = new TextInputBuilder()
+                    .setCustomId('input')
+                    .setLabel(label)
+                    .setStyle(interaction.customId === 'set_description' ? TextInputStyle.Paragraph : TextInputStyle.Short)
+                    .setRequired(true);
+
+                modal.addComponents(new ActionRowBuilder().addComponents(input));
+                return await interaction.showModal(modal);
+            }
+
+            if (interaction.customId === 'preview_embed') {
+                const data = embedData.get(userId);
+                if (!data) return interaction.reply({ content: 'L\'embed est vide.', flags: [MessageFlags.Ephemeral] });
+
+                const preview = new EmbedBuilder()
+                    .setColor(data.color || 0xFFFFFF)
+                    .setTitle(data.title || 'Sans titre')
+                    .setDescription(data.description || 'Sans description')
+                    .setImage(data.image || null)
+                    .setFooter(data.footer ? { text: data.footer } : null);
+
+                return await interaction.reply({ content: 'Voici un aperçu :', embeds: [preview], flags: [MessageFlags.Ephemeral] });
+            }
+
+            if (interaction.customId === 'send_embed') {
+                const data = embedData.get(userId);
+                if (!data || (!data.title && !data.description)) {
+                    return interaction.reply({ content: 'L\'embed doit avoir au moins un titre ou une description.', flags: [MessageFlags.Ephemeral] });
+                }
+
+                const channels = interaction.guild.channels.cache
+                    .filter(c => c.type === ChannelType.GuildText)
+                    .first(25);
+
+                const select = new StringSelectMenuBuilder()
+                    .setCustomId(`sendToChannel_${userId}`)
+                    .setPlaceholder('Choisir le salon...')
+                    .addOptions(channels.map(c => ({ label: c.name, value: c.id })));
+
+                return await interaction.reply({ content: 'Sélectionnez le salon d\'envoi :', components: [new ActionRowBuilder().addComponents(select)], flags: [MessageFlags.Ephemeral] });
+            }
+
+            if (interaction.customId === 'close_ticket') {
+                await interaction.reply({ content: 'Le ticket va être fermé dans 5 secondes...' });
+                setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
+                return;
+            }
+        }
     } catch (error) {
         logError(error, 'Event: interactionCreate');
     }

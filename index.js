@@ -42,22 +42,55 @@ client.once('clientReady', (c) => {
     console.log(`Bot prêt ! Connecté en tant que ${c.user.tag}`);
 });
 
+// Centralized Error Logger
+const logError = async (error, context = '') => {
+    console.error(`[ERROR] ${context}:`, error);
+    const logChannelId = '1483480300112842874';
+    try {
+        const guild = client.guilds.cache.first();
+        if (!guild) return;
+        const channel = await guild.channels.fetch(logChannelId).catch(() => null);
+        if (channel) {
+            const embed = new EmbedBuilder()
+                .setColor(0xFF0000)
+                .setTitle('Erreur Détectée')
+                .addFields(
+                    { name: 'Contexte', value: context || 'Global', inline: true },
+                    { name: 'Message', value: `\`\`\`${error.message || error}\`\`\`` }
+                )
+                .setTimestamp();
+            await channel.send({ embeds: [embed] });
+        }
+    } catch (e) {
+        console.error('Impossible d\'envoyer le log d\'erreur sur Discord:', e);
+    }
+};
+
+// Catch Global Exceptions
+process.on('unhandledRejection', error => logError(error, 'Unhandled Rejection'));
+process.on('uncaughtException', error => logError(error, 'Uncaught Exception'));
+
 client.on('guildMemberAdd', async (member) => {
-    const welcomeChannelId = '1483231963308494920';
-    const channel = member.guild.channels.cache.get(welcomeChannelId);
-    
-    if (channel) {
-        const embed = new EmbedBuilder()
-            .setColor(0xFFFFFF)
-            .setTitle('Bienvenue')
-            .setDescription(`Bienvenue ${member} ! Grâce à toi, nous sommes maintenant **${member.guild.memberCount}** membres.`);
+    try {
+        const welcomeChannelId = '1483231963308494920';
+        const channel = member.guild.channels.cache.get(welcomeChannelId);
         
-        channel.send({ content: `${member}`, embeds: [embed] });
+        if (channel) {
+            const embed = new EmbedBuilder()
+                .setColor(0xFFFFFF)
+                .setTitle('Bienvenue')
+                .setDescription(`Bienvenue ${member} ! Grâce à toi, nous sommes maintenant **${member.guild.memberCount}** membres.`);
+            
+            await channel.send({ content: `${member}`, embeds: [embed] });
+        }
+    } catch (error) {
+        logError(error, 'Event: guildMemberAdd');
     }
 });
 
 client.on('messageCreate', async (message) => {
-    if (message.author.bot || !message.content.startsWith(PREFIX)) return;
+    try {
+        if (message.author.bot || !message.content.startsWith(PREFIX)) return;
 
     const args = message.content.slice(PREFIX.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
@@ -157,6 +190,20 @@ client.on('messageCreate', async (message) => {
         await message.channel.send({ embeds: [embed], components: [row] });
     }
 
+    // Command: -bban
+    if (command === 'bban') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.BanMembers)) return;
+        const target = await getMember(args[0]);
+        if (!target) return message.reply('Veuillez mentionner un utilisateur ou donner son ID.');
+        if (!target.bannable) return message.reply('Je ne peux pas ban cet utilisateur.');
+
+        await target.ban({ reason: 'Ban rapide (-bban)' });
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setDescription(`${target.user.tag} a été banni rapidement.`);
+        message.channel.send({ embeds: [embed] });
+    }
+
     // Command: -clear
     if (command === 'clear') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) return;
@@ -197,6 +244,19 @@ client.on('messageCreate', async (message) => {
 
         const row = new ActionRowBuilder().addComponents(select);
         await message.channel.send({ embeds: [embed], components: [row] });
+    }
+
+    // Command: -mmute
+    if (command === 'mmute') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) return;
+        const target = await getMember(args[0]);
+        if (!target) return message.reply('Usage: -mmute @user/ID');
+
+        await target.timeout(86400000); // 24h
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setDescription(`${target.user.tag} a été mute pour 24 heures.`);
+        message.channel.send({ embeds: [embed] });
     }
 
     // Command: -soumis
@@ -387,7 +447,7 @@ client.on('messageCreate', async (message) => {
             .setColor(0xFFFFFF)
             .setTitle('Liste des commandes')
             .addFields(
-                { name: 'Administration', value: '`-setupticket`, `-kick`, `-ban`, `-clear`, `-tempmute`, `-lock`, `-unlock`, `-slowmode`' },
+                { name: 'Administration', value: '`-setupticket`, `-kick`, `-ban`, `-bban`, `-clear`, `-tempmute`, `-mmute`, `-lock`, `-unlock`, `-slowmode`' },
                 { name: 'Système Soumis', value: '`-soumis @user`, `-unsoumis @user`' },
                 { name: 'Utilitaire', value: '`-pic`, `-banner`, `-userinfo`, `-serverinfo`, `-ping`' }
             );
@@ -400,7 +460,8 @@ const embedData = new Collection();
 
 // Interaction Handling (Buttons & Select Menus & Modals)
 client.on('interactionCreate', async (interaction) => {
-    if (interaction.isModalSubmit()) {
+    try {
+        if (interaction.isModalSubmit()) {
         const [type, userId] = interaction.customId.split('_');
         if (interaction.user.id !== userId) return interaction.reply({ content: 'Ce n\'est pas votre session.', flags: [MessageFlags.Ephemeral] });
 

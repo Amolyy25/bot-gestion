@@ -328,10 +328,15 @@ client.on('guildMemberAdd', async (member) => {
         const channel = member.guild.channels.cache.get(welcomeChannelId);
         
         if (channel) {
+            let welcomeDesc = `Bienvenue ${member} ! Grâce à toi, nous sommes maintenant **${member.guild.memberCount}** membres.`;
+            if (inviterId) {
+                welcomeDesc += `\n\nInvité par : <@${inviterId}>`;
+            }
+
             const embed = new EmbedBuilder()
                 .setColor(0xFFFFFF)
                 .setTitle('Bienvenue')
-                .setDescription(`Bienvenue ${member} ! Grâce à toi, nous sommes maintenant **${member.guild.memberCount}** membres.`);
+                .setDescription(welcomeDesc);
             
             await channel.send({ content: `${member}`, embeds: [embed] });
         }

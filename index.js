@@ -708,6 +708,20 @@ client.on('messageCreate', async (message) => {
         await message.channel.send({ embeds: [embed], components: [row1, row2] });
     }
 
+    // Command: -setupticket
+    if (command === 'setupticket') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle('Support VIP')
+            .setDescription('Besoin d\'aide ou d\'informations sur le Pass VIP ? Cliquez sur le bouton ci-dessous pour ouvrir un ticket.');
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('open_ticket').setLabel('Ouvrir un ticket').setStyle(ButtonStyle.Primary)
+        );
+        await message.channel.send({ embeds: [embed], components: [row] });
+        await message.delete();
+    }
+
     // Command: -setupcodes
     if (command === 'setupcodes') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
@@ -944,6 +958,33 @@ client.on('interactionCreate', async (interaction) => {
                     .addOptions(channels.map(c => ({ label: c.name, value: c.id })));
 
                 return await interaction.reply({ content: 'Sélectionnez le salon d\'envoi :', components: [new ActionRowBuilder().addComponents(select)], flags: [MessageFlags.Ephemeral] });
+            }
+
+            if (interaction.customId === 'open_ticket') {
+                const guild = interaction.guild;
+                const staffRoleId = '1483537167555891211';
+                const channel = await guild.channels.create({
+                    name: `ticket-${interaction.user.username}`,
+                    type: ChannelType.GuildText,
+                    permissionOverwrites: [
+                        { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                        { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.AttachFiles] },
+                        { id: staffRoleId, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageMessages, PermissionsBitField.Flags.ReadMessageHistory] }
+                    ],
+                });
+
+                const embed = new EmbedBuilder()
+                    .setColor(0xFFFFFF)
+                    .setTitle('Ticket Ouvert')
+                    .setDescription(`Bonjour ${interaction.user}, un membre du staff va s'occuper de vous.`)
+                    .setFooter({ text: 'Utilisez le bouton ci-dessous pour fermer le ticket.' });
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer le ticket').setStyle(ButtonStyle.Danger)
+                );
+
+                await channel.send({ embeds: [embed], components: [row] });
+                return await interaction.reply({ content: `Votre ticket a été créé : ${channel}`, flags: [MessageFlags.Ephemeral] });
             }
 
             if (interaction.customId === 'close_ticket') {

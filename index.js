@@ -718,21 +718,25 @@ const embedData = new Collection();
 client.on('interactionCreate', async (interaction) => {
     try {
         if (interaction.isModalSubmit()) {
-        const [type, userId] = interaction.customId.split('_');
-        if (interaction.user.id !== userId) return interaction.reply({ content: 'Ce n\'est pas votre session.', flags: [MessageFlags.Ephemeral] });
+            const [type, userId] = interaction.customId.split('_');
+            const embedModalTypes = ['modalTitle', 'modalDesc', 'modalColor', 'modalImage', 'modalFooter'];
+            
+            if (embedModalTypes.includes(type)) {
+                if (interaction.user.id !== userId) return interaction.reply({ content: 'Ce n\'est pas votre session.', flags: [MessageFlags.Ephemeral] });
 
-        let data = embedData.get(userId) || {};
-        const value = interaction.fields.getTextInputValue('input');
+                let data = embedData.get(userId) || {};
+                const value = interaction.fields.getTextInputValue('input');
 
-        if (type === 'modalTitle') data.title = value;
-        if (type === 'modalDesc') data.description = value;
-        if (type === 'modalColor') data.color = value.startsWith('#') ? value : `#${value}`;
-        if (type === 'modalImage') data.image = value;
-        if (type === 'modalFooter') data.footer = value;
+                if (type === 'modalTitle') data.title = value;
+                if (type === 'modalDesc') data.description = value;
+                if (type === 'modalColor') data.color = value.startsWith('#') ? value : `#${value}`;
+                if (type === 'modalImage') data.image = value;
+                if (type === 'modalFooter') data.footer = value;
 
-        embedData.set(userId, data);
-        await interaction.reply({ content: 'Valeur mise à jour !', flags: [MessageFlags.Ephemeral] });
-    }
+                embedData.set(userId, data);
+                return await interaction.reply({ content: 'Valeur mise à jour !', flags: [MessageFlags.Ephemeral] });
+            }
+        }
 
     if (interaction.isModalSubmit() && interaction.customId === 'vip_code_modal') {
         const codeInput = interaction.fields.getTextInputValue('code_input').trim();

@@ -14,7 +14,8 @@ const {
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
-    ChannelType
+    ChannelType,
+    MessageFlags
 } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
@@ -37,8 +38,8 @@ if (!fs.existsSync(ROLES_FILE)) {
     fs.writeFileSync(ROLES_FILE, JSON.stringify({}));
 }
 
-client.once('ready', () => {
-    console.log(`Bot prêt ! Connecté en tant que ${client.user.tag}`);
+client.once('clientReady', (c) => {
+    console.log(`Bot prêt ! Connecté en tant que ${c.user.tag}`);
 });
 
 client.on('guildMemberAdd', async (member) => {
@@ -401,7 +402,7 @@ const embedData = new Collection();
 client.on('interactionCreate', async (interaction) => {
     if (interaction.isModalSubmit()) {
         const [type, userId] = interaction.customId.split('_');
-        if (interaction.user.id !== userId) return interaction.reply({ content: 'Ce n\'est pas votre session.', ephemeral: true });
+        if (interaction.user.id !== userId) return interaction.reply({ content: 'Ce n\'est pas votre session.', flags: [MessageFlags.Ephemeral] });
 
         let data = embedData.get(userId) || {};
         const value = interaction.fields.getTextInputValue('input');
@@ -413,7 +414,7 @@ client.on('interactionCreate', async (interaction) => {
         if (type === 'modalFooter') data.footer = value;
 
         embedData.set(userId, data);
-        await interaction.reply({ content: 'Valeur mise à jour !', ephemeral: true });
+        await interaction.reply({ content: 'Valeur mise à jour !', flags: [MessageFlags.Ephemeral] });
     }
 
     if (interaction.isStringSelectMenu()) {
@@ -421,10 +422,10 @@ client.on('interactionCreate', async (interaction) => {
         
         if (action === 'sendToChannel') {
             const data = embedData.get(interaction.user.id);
-            if (!data) return interaction.reply({ content: 'Aucune donnée d\'embed trouvée.', ephemeral: true });
+            if (!data) return interaction.reply({ content: 'Aucune donnée d\'embed trouvée.', flags: [MessageFlags.Ephemeral] });
 
             const channel = interaction.guild.channels.cache.get(interaction.values[0]);
-            if (!channel) return interaction.reply({ content: 'Salon introuvable.', ephemeral: true });
+            if (!channel) return interaction.reply({ content: 'Salon introuvable.', flags: [MessageFlags.Ephemeral] });
 
             const embed = new EmbedBuilder()
                 .setColor(data.color || 0xFFFFFF)
@@ -441,7 +442,7 @@ client.on('interactionCreate', async (interaction) => {
 
         const target = await interaction.guild.members.fetch(targetId).catch(() => null);
 
-        if (!target) return interaction.reply({ content: 'Utilisateur introuvable.', ephemeral: true });
+        if (!target) return interaction.reply({ content: 'Utilisateur introuvable.', flags: [MessageFlags.Ephemeral] });
 
         if (action === 'mute') {
             const duration = parseInt(interaction.values[0]);
@@ -500,7 +501,7 @@ client.on('interactionCreate', async (interaction) => {
 
         if (interaction.customId === 'preview_embed') {
             const data = embedData.get(userId);
-            if (!data) return interaction.reply({ content: 'L\'embed est vide.', ephemeral: true });
+            if (!data) return interaction.reply({ content: 'L\'embed est vide.', flags: [MessageFlags.Ephemeral] });
 
             const preview = new EmbedBuilder()
                 .setColor(data.color || 0xFFFFFF)
@@ -509,13 +510,13 @@ client.on('interactionCreate', async (interaction) => {
                 .setImage(data.image || null)
                 .setFooter(data.footer ? { text: data.footer } : null);
 
-            return await interaction.reply({ content: 'Voici un aperçu :', embeds: [preview], ephemeral: true });
+            return await interaction.reply({ content: 'Voici un aperçu :', embeds: [preview], flags: [MessageFlags.Ephemeral] });
         }
 
         if (interaction.customId === 'send_embed') {
             const data = embedData.get(userId);
             if (!data || (!data.title && !data.description)) {
-                return interaction.reply({ content: 'L\'embed doit avoir au moins un titre ou une description.', ephemeral: true });
+                return interaction.reply({ content: 'L\'embed doit avoir au moins un titre ou une description.', flags: [MessageFlags.Ephemeral] });
             }
 
             const channels = interaction.guild.channels.cache
@@ -527,7 +528,7 @@ client.on('interactionCreate', async (interaction) => {
                 .setPlaceholder('Choisir le salon...')
                 .addOptions(channels.map(c => ({ label: c.name, value: c.id })));
 
-            await interaction.reply({ content: 'Sélectionnez le salon d\'envoi :', components: [new ActionRowBuilder().addComponents(select)], ephemeral: true });
+            await interaction.reply({ content: 'Sélectionnez le salon d\'envoi :', components: [new ActionRowBuilder().addComponents(select)], flags: [MessageFlags.Ephemeral] });
         }
 
         if (interaction.customId === 'open_ticket') {
@@ -565,7 +566,7 @@ client.on('interactionCreate', async (interaction) => {
         );
 
         await channel.send({ embeds: [embed], components: [row] });
-        await interaction.reply({ content: `Votre ticket a été créé : ${channel}`, ephemeral: true });
+        await interaction.reply({ content: `Votre ticket a été créé : ${channel}`, flags: [MessageFlags.Ephemeral] });
     }
 
     if (interaction.customId === 'close_ticket') {

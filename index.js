@@ -700,7 +700,7 @@ client.on('messageCreate', async (message) => {
             .setColor(0xFFFFFF)
             .setTitle('Liste des commandes')
             .addFields(
-                { name: 'Administration', value: '`-setupticket`, `-setupcodes`, `-kick`, `-ban`, `-bban`, `-clear`, `-tempmute`, `-mmute`, `-lock`, `-unlock`, `-slowmode`' },
+                { name: 'Administrationnnnnn', value: '`-setupticket`, `-setupcodes`, `-kick`, `-ban`, `-bban`, `-clear`, `-tempmute`, `-mmute`, `-lock`, `-unlock`, `-slowmode`' },
                 { name: 'Système Soumis', value: '`-soumis @user`, `-unsoumis @user`' },
                 { name: 'Utilitaire', value: '`-pic`, `-banner`, `-userinfo`, `-serverinfo`, `-ping`, `-invites @user`' }
             );

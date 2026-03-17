@@ -26,7 +26,7 @@ const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1483524819281510472/o55laE3KeMcStT6p2pkVzXNEhcvcL3KWtdEd66tzrHsYWgmxR6cfqr_2n81gov0OWrnC";
+const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1483531247685992608/UtI6SotnOhf-Iw95F82v-pfzCHQfTh_mzcMQ0vmzmBB3cEwxAHI3kEuM_boX7AqhzsNE";
 
 const client = new Client({
     intents: [
@@ -722,8 +722,6 @@ client.on('interactionCreate', async (interaction) => {
             const embedModalTypes = ['modalTitle', 'modalDesc', 'modalColor', 'modalImage', 'modalFooter'];
             
             if (embedModalTypes.includes(type)) {
-                if (interaction.user.id !== userId) return interaction.reply({ content: 'Ce n\'est pas votre session.', flags: [MessageFlags.Ephemeral] });
-
                 let data = embedData.get(userId) || {};
                 const value = interaction.fields.getTextInputValue('input');
 

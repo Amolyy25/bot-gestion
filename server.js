@@ -8,7 +8,7 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const CODES_FILE = path.join(__dirname, 'codes.json');
-const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1483524819281510472/o55laE3KeMcStT6p2pkVzXNEhcvcL3KWtdEd66tzrHsYWgmxR6cfqr_2n81gov0OWrnC";
+const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1483531247685992608/UtI6SotnOhf-Iw95F82v-pfzCHQfTh_mzcMQ0vmzmBB3cEwxAHI3kEuM_boX7AqhzsNE";
 
 app.use(cors());
 app.use(bodyParser.json());

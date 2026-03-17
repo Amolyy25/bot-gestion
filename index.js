@@ -156,6 +156,21 @@ client.on('inviteDelete', (invite) => {
     if (invites) invites.delete(invite.code);
 });
 
+client.on('guildMemberAdd', async (member) => {
+    const channelId = '1483532401404543077';
+    const channel = member.guild.channels.cache.get(channelId);
+    if (!channel) return;
+
+    try {
+        const msg = await channel.send(`<@${member.id}>`);
+        setTimeout(async () => {
+            await msg.delete().catch(() => {});
+        }, 3000);
+    } catch (err) {
+        console.error("Erreur interaction join ping:", err);
+    }
+});
+
 // Centralized Error Logger
 const logError = async (error, context = '') => {
     console.error(`[ERROR] ${context}:`, error);

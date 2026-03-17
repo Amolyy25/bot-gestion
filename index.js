@@ -680,7 +680,7 @@ client.on('messageCreate', async (message) => {
             .setColor(0xFFFFFF)
             .setTitle('Récupération Pass VIP')
             .setDescription('Si vous avez acheté un Pass VIP sur notre site, cliquez sur le bouton ci-dessous pour entrer votre code.')
-            .addFields({ name: 'Site Web', value: '`http://localhost:3000`' })
+            .addFields({ name: 'Site Web', value: '`https://doroplace.vercel.app/`' })
             .setFooter({ text: 'Système de Validation' });
 
         const row = new ActionRowBuilder().addComponents(

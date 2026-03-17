@@ -1,0 +1,4 @@
+node_modules
+.env
+soumis_roles.json
+.DS_Store

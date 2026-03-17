@@ -571,6 +571,7 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.customId === 'close_ticket') {
         await interaction.reply('Le ticket va être fermé dans 5 secondes...');
         setTimeout(() => interaction.channel.delete(), 5000);
+        }
     }
 });
 

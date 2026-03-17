@@ -46,16 +46,16 @@ const CODES_FILE = path.join(__dirname, 'codes.json');
 const spamMap = new Collection();
 const guildInvites = new Collection();
 
-// Ensure files exist
-if (!fs.existsSync(ROLES_FILE)) {
-    fs.writeFileSync(ROLES_FILE, JSON.stringify({}));
-}
-if (!fs.existsSync(INVITES_FILE)) {
-    fs.writeFileSync(INVITES_FILE, JSON.stringify({}));
-}
-if (!fs.existsSync(CODES_FILE)) {
-    fs.writeFileSync(CODES_FILE, JSON.stringify({ codes: [] }));
-}
+// Ensure files exist and are not empty
+const setupFile = (filePath, defaultContent) => {
+    if (!fs.existsSync(filePath) || fs.readFileSync(filePath, 'utf8').trim() === "") {
+        fs.writeFileSync(filePath, JSON.stringify(defaultContent, null, 2));
+    }
+};
+
+setupFile(ROLES_FILE, {});
+setupFile(INVITES_FILE, {});
+setupFile(CODES_FILE, { codes: [] });
 
 // --- EXPRESS SERVER CONFIG ---
 app.use(cors());

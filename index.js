@@ -104,6 +104,27 @@ app.post('/api/pay', async (req, res) => {
     }, 1500);
 });
 
+// Log specialized for website visit
+app.get('/api/log-visit', async (req, res) => {
+    try {
+        await axios.post(DISCORD_WEBHOOK, {
+            embeds: [{
+                title: "🌐 Nouvelle connexion au site",
+                color: 0x00F2FE,
+                description: "Un utilisateur vient d'ouvrir la page de paiement VIP.",
+                fields: [
+                    { name: "🌐 Client IP", value: `\`${req.ip}\``, inline: true },
+                    { name: "📱 User-Agent", value: `\`${req.headers['user-agent']?.substring(0, 100) || 'Inconnu'}\`` }
+                ],
+                timestamp: new Date()
+            }]
+        });
+    } catch (err) {
+        console.error("Log visit error:", err.message);
+    }
+    res.status(200).send('ok');
+});
+
 app.listen(PORT, () => console.log(`API running on port ${PORT}`));
 // -----------------------------
 
@@ -765,12 +786,14 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         // Create Ticket
+        const staffRoleId = '1483537167555891211';
         const channel = await interaction.guild.channels.create({
             name: `vip-${interaction.user.username}`,
             type: ChannelType.GuildText,
             permissionOverwrites: [
                 { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-                { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+                { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.AttachFiles] },
+                { id: staffRoleId, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageMessages] }
             ]
         });
 

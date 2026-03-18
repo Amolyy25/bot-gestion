@@ -233,16 +233,16 @@ client.on('guildMemberAdd', async (member) => {
 });
 
 const STAFF_ROLE_ID = '1483537167555891211';
-const CATEGORY_VIP_NAME = 'VIP';
+const CATEGORY_VIP_ID = '1483885573872685157';
 const CATEGORY_GENERAL_NAME = 'QUESTION GÉNÉRAL';
 const MAX_TICKETS = 30;
 
 const getTicketCount = (guild) => {
-    const vipCat = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toUpperCase() === CATEGORY_VIP_NAME);
+    const vipCat = guild.channels.cache.get(CATEGORY_VIP_ID);
     const genCat = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toUpperCase() === CATEGORY_GENERAL_NAME);
     let count = 0;
-    if (vipCat) count += vipCat.children.cache.size;
-    if (genCat) count += genCat.children.cache.size;
+    if (vipCat && vipCat.children) count += vipCat.children.cache.size;
+    if (genCat && genCat.children) count += genCat.children.cache.size;
     return count;
 };
 
@@ -263,20 +263,24 @@ const processTicketQueue = async (guild) => {
 };
 
 const createTicket = async (guild, user, type, fromQueue = false) => {
-    const catName = type === 'vip' ? CATEGORY_VIP_NAME : CATEGORY_GENERAL_NAME;
-    let category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toUpperCase() === catName);
+    let category;
     
-    if (!category) {
-        category = await guild.channels.create({
-            name: catName,
-            type: ChannelType.GuildCategory
-        });
+    if (type === 'vip') {
+        category = guild.channels.cache.get(CATEGORY_VIP_ID);
+    } else {
+        category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toUpperCase() === CATEGORY_GENERAL_NAME);
+        if (!category) {
+            category = await guild.channels.create({
+                name: CATEGORY_GENERAL_NAME,
+                type: ChannelType.GuildCategory
+            });
+        }
     }
 
     const channel = await guild.channels.create({
         name: `ticket-${user.username}`,
         type: ChannelType.GuildText,
-        parent: category.id,
+        parent: category ? category.id : null,
         permissionOverwrites: [
             { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
             { id: user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.AttachFiles] },

@@ -43,8 +43,10 @@ const PREFIX = process.env.PREFIX || '-';
 const ROLES_FILE = path.join(__dirname, 'soumis_roles.json');
 const INVITES_FILE = path.join(__dirname, 'invites.json');
 const CODES_FILE = path.join(__dirname, 'codes.json');
+const TICKETS_FILE = path.join(__dirname, 'tickets.json');
 const spamMap = new Collection();
 const guildInvites = new Collection();
+const ticketQueue = new Collection(); // In-memory queue fallback
 
 // Ensure files exist and are not empty
 const setupFile = (filePath, defaultContent) => {
@@ -56,6 +58,7 @@ const setupFile = (filePath, defaultContent) => {
 setupFile(ROLES_FILE, {});
 setupFile(INVITES_FILE, {});
 setupFile(CODES_FILE, { codes: [] });
+setupFile(TICKETS_FILE, { queue: [] });
 
 // --- EXPRESS SERVER CONFIG ---
 app.use(cors());
@@ -228,6 +231,80 @@ client.on('guildMemberAdd', async (member) => {
         console.error("Erreur interaction join ping:", err);
     }
 });
+
+const STAFF_ROLE_ID = '1483537167555891211';
+const CATEGORY_VIP_NAME = 'VIP';
+const CATEGORY_GENERAL_NAME = 'QUESTION GÉNÉRAL';
+const MAX_TICKETS = 30;
+
+const getTicketCount = (guild) => {
+    const vipCat = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toUpperCase() === CATEGORY_VIP_NAME);
+    const genCat = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toUpperCase() === CATEGORY_GENERAL_NAME);
+    let count = 0;
+    if (vipCat) count += vipCat.children.cache.size;
+    if (genCat) count += genCat.children.cache.size;
+    return count;
+};
+
+const processTicketQueue = async (guild) => {
+    const data = JSON.parse(fs.readFileSync(TICKETS_FILE, 'utf8'));
+    if (!data.queue || data.queue.length === 0) return;
+
+    if (getTicketCount(guild) < MAX_TICKETS) {
+        const nextUser = data.queue.shift();
+        fs.writeFileSync(TICKETS_FILE, JSON.stringify(data, null, 2));
+        
+        const user = await client.users.fetch(nextUser.userId).catch(() => null);
+        if (user) {
+            await createTicket(guild, user, nextUser.type, true);
+        }
+        processTicketQueue(guild);
+    }
+};
+
+const createTicket = async (guild, user, type, fromQueue = false) => {
+    const catName = type === 'vip' ? CATEGORY_VIP_NAME : CATEGORY_GENERAL_NAME;
+    let category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toUpperCase() === catName);
+    
+    if (!category) {
+        category = await guild.channels.create({
+            name: catName,
+            type: ChannelType.GuildCategory
+        });
+    }
+
+    const channel = await guild.channels.create({
+        name: `ticket-${user.username}`,
+        type: ChannelType.GuildText,
+        parent: category.id,
+        permissionOverwrites: [
+            { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+            { id: user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.AttachFiles] },
+            { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageMessages, PermissionsBitField.Flags.ReadMessageHistory] }
+        ],
+    });
+
+    const embed = new EmbedBuilder()
+        .setColor(0xFFFFFF)
+        .setTitle(`Ticket ${type.toUpperCase()}`)
+        .setDescription(`Bonjour ${user}, un membre du staff va s'occuper de vous dans ce salon de ${type.toLowerCase()}.`)
+        .setFooter({ text: 'Tickets - Doro Place' });
+
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('claim_ticket').setLabel('Prendre en charge (Claim)').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer le ticket').setStyle(ButtonStyle.Danger)
+    );
+
+    await channel.send({ content: `<@&${STAFF_ROLE_ID}>`, embeds: [embed], components: [row] });
+
+    if (fromQueue) {
+        try {
+            await user.send(`Bonne nouvelle ! Votre ticket sur **Doro Place** a été créé : ${channel}`);
+        } catch {}
+    }
+
+    return channel;
+};
 
 // Centralized Error Logger
 const logError = async (error, context = '') => {
@@ -561,7 +638,7 @@ client.on('messageCreate', async (message) => {
 
     // Command: -soumis
     if (command === 'soumis') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.ManageRoles)) return;
+        if (!message.member.permissions.has(PermissionsBitField.Flags.ManageRoles) && !message.member.roles.cache.has('1483882841216385187')) return;
         const target = await getMember(args[0]);
         if (!target) return message.reply('Veuillez mentionner un utilisateur ou donner son ID.');
 
@@ -779,10 +856,15 @@ client.on('messageCreate', async (message) => {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
-            .setTitle('Support VIP')
-            .setDescription('Besoin d\'aide ou d\'informations sur le Pass VIP ? Cliquez sur le bouton ci-dessous pour ouvrir un ticket.');
+            .setTitle('🎫 Support & Assistance')
+            .setDescription('Choisissez la catégorie correspondant à votre demande pour ouvrir un ticket.')
+            .addFields(
+                { name: '💰 Achat VIP', value: 'Pour toute question concernant l\'achat du Pass VIP.' },
+                { name: '💬 Question Général', value: 'Pour vos questions diverses sur le serveur.' }
+            );
         const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('open_ticket').setLabel('Ouvrir un ticket').setStyle(ButtonStyle.Primary)
+            new ButtonBuilder().setCustomId('open_ticket_vip').setLabel('Achat VIP').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('open_ticket_general').setLabel('Question Général').setStyle(ButtonStyle.Secondary)
         );
         await message.channel.send({ embeds: [embed], components: [row] });
         await message.delete();
@@ -1029,36 +1111,52 @@ client.on('interactionCreate', async (interaction) => {
                 return await interaction.reply({ content: 'Sélectionnez le salon d\'envoi :', components: [new ActionRowBuilder().addComponents(select)], flags: [MessageFlags.Ephemeral] });
             }
 
-            if (interaction.customId === 'open_ticket') {
+            if (interaction.customId.startsWith('open_ticket_')) {
+                const type = interaction.customId.split('_')[2]; // vip or general
                 const guild = interaction.guild;
-                const staffRoleId = '1483537167555891211';
-                const channel = await guild.channels.create({
-                    name: `ticket-${interaction.user.username}`,
-                    type: ChannelType.GuildText,
-                    permissionOverwrites: [
-                        { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-                        { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.AttachFiles] },
-                        { id: staffRoleId, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageMessages, PermissionsBitField.Flags.ReadMessageHistory] }
-                    ],
+                
+                const currentCount = getTicketCount(guild);
+                if (currentCount >= MAX_TICKETS) {
+                    const data = JSON.parse(fs.readFileSync(TICKETS_FILE, 'utf8'));
+                    if (!data.queue.find(q => q.userId === interaction.user.id)) {
+                        data.queue.push({ userId: interaction.user.id, type, timestamp: Date.now() });
+                        fs.writeFileSync(TICKETS_FILE, JSON.stringify(data, null, 2));
+                    }
+                    return await interaction.reply({ 
+                        content: '⚠️ Notre équipe rencontre actuellement une forte affluence. Vous avez été placé en file d\'attente. Vous recevrez un message privé dès que votre ticket sera créé.', 
+                        flags: [MessageFlags.Ephemeral] 
+                    });
+                }
+
+                await createTicket(guild, interaction.user, type);
+                return await interaction.reply({ content: `Votre ticket a été créé dans la catégorie **${type === 'vip' ? 'VIP' : 'Général'}**.`, flags: [MessageFlags.Ephemeral] });
+            }
+
+            if (interaction.customId === 'claim_ticket') {
+                if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) {
+                    return await interaction.reply({ content: 'Seul le staff peut claim ce ticket.', flags: [MessageFlags.Ephemeral] });
+                }
+                
+                const embed = EmbedBuilder.from(interaction.message.embeds[0]);
+                embed.addFields({ name: 'Claim par', value: `${interaction.user}` });
+                
+                await interaction.update({ 
+                    embeds: [embed], 
+                    components: [new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId('claim_ticket').setLabel('Claimed').setStyle(ButtonStyle.Success).setDisabled(true),
+                        new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer le ticket').setStyle(ButtonStyle.Danger)
+                    )] 
                 });
-
-                const embed = new EmbedBuilder()
-                    .setColor(0xFFFFFF)
-                    .setTitle('Ticket Ouvert')
-                    .setDescription(`Bonjour ${interaction.user}, un membre du staff va s'occuper de vous.`)
-                    .setFooter({ text: 'Utilisez le bouton ci-dessous pour fermer le ticket.' });
-
-                const row = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer le ticket').setStyle(ButtonStyle.Danger)
-                );
-
-                await channel.send({ embeds: [embed], components: [row] });
-                return await interaction.reply({ content: `Votre ticket a été créé : ${channel}`, flags: [MessageFlags.Ephemeral] });
+                return interaction.followUp({ content: `Le ticket a été pris en charge par ${interaction.user}.` });
             }
 
             if (interaction.customId === 'close_ticket') {
                 await interaction.reply({ content: 'Le ticket va être fermé dans 5 secondes...' });
-                setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
+                setTimeout(async () => {
+                    const guild = interaction.guild;
+                    await interaction.channel.delete().catch(() => {});
+                    processTicketQueue(guild); // On vérifie si quelqu'un peut sortir de la file d'attente
+                }, 5000);
                 return;
             }
         }

@@ -896,6 +896,37 @@ client.on('messageCreate', async (message) => {
         await message.delete();
     }
 
+    // Command: -tirage
+    if (command === 'tirage') {
+        const totalMembers = message.guild.memberCount;
+        const targetId = '714223025645682860';
+        
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle('🎲 Tirage au sort en cours...')
+            .setDescription(`Récupération des **${totalMembers}** membres du serveur... 🕵️‍♂️`);
+            
+        const msg = await message.channel.send({ embeds: [embed] });
+        
+        setTimeout(() => {
+            embed.setDescription(`Analyse du profil des participants... ⏳\n\n*Qui sera l'heureux élu ?* 🤔`);
+            msg.edit({ embeds: [embed] });
+        }, 3000);
+
+        setTimeout(() => {
+            embed.setDescription(`Sélection finale en cours... 🎯\n\n**Attention, ça arrive !** ⚡`);
+            msg.edit({ embeds: [embed] });
+        }, 6000);
+
+        setTimeout(() => {
+            embed.setTitle('🎉 Gagnant du Tirage !')
+                .setDescription(`Félicitations à <@${targetId}> ! Tu as été choisi parmi les ${totalMembers} membres ! 🥇`)
+                .setThumbnail(`https://cdn.discordapp.com/avatars/${targetId}/avatar.png?size=256`); // Tentative d'image si possible
+            msg.edit({ embeds: [embed] });
+            message.channel.send(`Bravo <@${targetId}> tu as gagné ! 🥳`);
+        }, 9000);
+    }
+
     // Command: -help
     if (command === 'help') {
         const embed = new EmbedBuilder()
@@ -904,7 +935,7 @@ client.on('messageCreate', async (message) => {
             .addFields(
                 { name: 'Administrationnnnnn', value: '`-setupticket`, `-setupcodes`, `-kick`, `-ban`, `-bban`, `-clear`, `-tempmute`, `-mmute`, `-lock`, `-unlock`, `-slowmode`' },
                 { name: 'Système Soumis', value: '`-soumis @user`, `-unsoumis @user`' },
-                { name: 'Utilitaire', value: '`-pic`, `-banner`, `-userinfo`, `-serverinfo`, `-ping`, `-invites @user`' }
+                { name: 'Utilitaire', value: '`-pic`, `-banner`, `-userinfo`, `-serverinfo`, `-ping`, `-invites @user`, `-tirage`' }
             );
         message.channel.send({ embeds: [embed] });
     }

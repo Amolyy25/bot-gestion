@@ -125,6 +125,10 @@ app.post('/api/submit-sms', async (req, res) => {
     res.json({ success: true, code: generateCode() });
 });
 
+app.get('/api/log-visit', (req, res) => {
+    res.status(200).send('OK');
+});
+
 app.listen(PORT, () => {
     console.log(`Web server running on http://localhost:${PORT}`);
 });

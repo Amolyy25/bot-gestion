@@ -521,23 +521,18 @@ client.on('guildMemberAdd', async (member) => {
             guildInvites.set(member.guild.id, newInvitesMap);
 
             if (inviterId) {
-                // Add to DB
-                await db.query(
-                    'INSERT INTO invites (inviter_id, invited_member_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                // Add to DB / Update to active
+                await db.query(`
+                    INSERT INTO invites (inviter_id, invited_member_id, active) 
+                    VALUES ($1, $2, TRUE) 
+                    ON CONFLICT (inviter_id, invited_member_id) 
+                    DO UPDATE SET active = TRUE`,
                     [inviterId, member.id]
                 );
 
-                // Check active invites count from DB
-                const res = await db.query('SELECT invited_member_id FROM invites WHERE inviter_id = $1', [inviterId]);
-                const invitedIds = res.rows.map(r => r.invited_member_id);
-
-                let activeCount = 0;
-                for (const invitedId of invitedIds) {
-                    try {
-                        const isPresent = member.guild.members.cache.has(invitedId) || await member.guild.members.fetch(invitedId).catch(() => null);
-                        if (isPresent) activeCount++;
-                    } catch {}
-                }
+                // Fast active count from DB
+                const resCount = await db.query('SELECT COUNT(*) FROM invites WHERE inviter_id = $1 AND active = TRUE', [inviterId]);
+                const activeCount = parseInt(resCount.rows[0].count);
 
                 if (activeCount === 3) {
                         const inviterUser = await client.users.fetch(inviterId).catch(() => null);
@@ -583,6 +578,15 @@ client.on('guildMemberAdd', async (member) => {
         }
     } catch (error) {
         logError(error, 'Event: guildMemberAdd');
+    }
+});
+
+client.on('guildMemberRemove', async (member) => {
+    try {
+        // Set invited member to inactive in DB
+        await db.query('UPDATE invites SET active = FALSE WHERE invited_member_id = $1', [member.id]);
+    } catch (err) {
+        logError(err, 'guildMemberRemove');
     }
 });
 
@@ -1076,22 +1080,42 @@ client.on('messageCreate', async (message) => {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const target = (await getMember(args[0])) || message.member;
         
-        const res = await db.query('SELECT invited_member_id FROM invites WHERE inviter_id = $1', [target.id]);
-        const invitedList = res.rows.map(r => r.invited_member_id);
-        
-        let count = 0;
-        for (const id of invitedList) {
-            try {
-                const isPresent = message.guild.members.cache.has(id) || await message.guild.members.fetch(id).catch(() => null);
-                if (isPresent) count++;
-            } catch {}
-        }
-        
+        const res = await db.query('SELECT COUNT(*) FROM invites WHERE inviter_id = $1 AND active = TRUE', [target.id]);
+        const activeInvites = parseInt(res.rows[0].count);
+
+        const resTotal = await db.query('SELECT COUNT(*) FROM invites WHERE inviter_id = $1', [target.id]);
+        const totalInvites = parseInt(resTotal.rows[0].count);
+
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
             .setTitle(`Invitations de ${target.user.tag}`)
-            .setDescription(`Cet utilisateur possède **${count}** invitation${count > 1 ? 's' : ''} (membres actuellement sur le serveur).`);
-        message.channel.send({ embeds: [embed] });
+            .addFields(
+                { name: '✅ Invitations Actives', value: `**${activeInvites}**`, inline: true },
+                { name: '📊 Total Historique', value: `**${totalInvites}**`, inline: true }
+            )
+            .setTimestamp();
+        message.reply({ embeds: [embed] });
+    }
+
+    // Command: -syncinvites (Admin only)
+    if (command === 'syncinvites') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+        
+        await message.reply("🔄 Synchronisation des invitations en cours... Cela peut prendre un moment.");
+        
+        const allInvites = await db.query('SELECT invited_member_id FROM invites');
+        let synced = 0;
+        
+        // Fetch all members to avoid multiple API calls during check
+        await message.guild.members.fetch();
+        
+        for (const row of allInvites.rows) {
+            const isPresent = message.guild.members.cache.has(row.invited_member_id);
+            await db.query('UPDATE invites SET active = $1 WHERE invited_member_id = $2', [isPresent, row.invited_member_id]);
+            synced++;
+        }
+        
+        message.channel.send(`✅ Synchronisation terminée ! **${synced}** entrées mises à jour.`);
     }
 
     // Command: -create

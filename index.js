@@ -1083,17 +1083,10 @@ client.on('messageCreate', async (message) => {
         const res = await db.query('SELECT COUNT(*) FROM invites WHERE inviter_id = $1 AND active = TRUE', [target.id]);
         const activeInvites = parseInt(res.rows[0].count);
 
-        const resTotal = await db.query('SELECT COUNT(*) FROM invites WHERE inviter_id = $1', [target.id]);
-        const totalInvites = parseInt(resTotal.rows[0].count);
-
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
             .setTitle(`Invitations de ${target.user.tag}`)
-            .addFields(
-                { name: '✅ Invitations Actives', value: `**${activeInvites}**`, inline: true },
-                { name: '📊 Total Historique', value: `**${totalInvites}**`, inline: true }
-            )
-            .setTimestamp();
+            .setDescription(`Cet utilisateur possède **${activeInvites}** invitation${activeInvites > 1 ? 's' : ''} (membres actuellement sur le serveur).`);
         message.reply({ embeds: [embed] });
     }
 

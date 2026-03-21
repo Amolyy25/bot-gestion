@@ -1077,7 +1077,6 @@ client.on('messageCreate', async (message) => {
 
     // Command: -invites
     if (command === 'invites') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const target = (await getMember(args[0])) || message.member;
         
         const res = await db.query('SELECT COUNT(*) FROM invites WHERE inviter_id = $1 AND active = TRUE', [target.id]);

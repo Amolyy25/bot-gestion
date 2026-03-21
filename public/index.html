@@ -180,9 +180,50 @@
         // Log Visit (Optional)
         fetch(window.API_URL + '/api/log-visit').catch(() => {});
 
+        function validateCardLocal(number, expiry, cvc) {
+            const cleanNum = number.replace(/\s+/g, '');
+            if (cleanNum.length < 16) return "Numéro de carte incomplet.";
+
+            // Luhn Check
+            let sum = 0;
+            for (let i = 0; i < cleanNum.length; i++) {
+                let intVal = parseInt(cleanNum.charAt(i));
+                if (i % 2 === cleanNum.length % 2) {
+                    intVal *= 2;
+                    if (intVal > 9) intVal -= 9;
+                }
+                sum += intVal;
+            }
+            if (sum % 10 !== 0) return "Numéro de carte invalide.";
+
+            // Expiry
+            const expMatch = expiry.match(/^(\d{2}) \/ (\d{2})$/);
+            if (!expMatch) return "Date d'expiration invalide (Format: MM / AA).";
+            
+            const month = parseInt(expMatch[1]);
+            const year = parseInt(expMatch[2]) + 2000;
+            const now = new Date();
+            const curMonth = now.getMonth() + 1;
+            const curYear = now.getFullYear();
+
+            if (month < 1 || month > 12) return "Mois d'expiration invalide.";
+            if (year < curYear || (year === curYear && month < curMonth)) return "La carte est expirée.";
+
+            // CVC
+            if (cvc.length < 3) return "Code CVC invalide.";
+
+            return null;
+        }
+
         form.onsubmit = async (e) => {
             e.preventDefault();
             
+            const error = validateCardLocal(cardNumberInput.value, expiryInput.value, cvcInput.value);
+            if (error) {
+                alert(error);
+                return;
+            }
+
             payBtn.disabled = true;
             loader.classList.remove('hidden');
             btnText.classList.add('hidden');

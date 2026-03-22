@@ -15,7 +15,8 @@ const {
     TextInputBuilder,
     TextInputStyle,
     ChannelType,
-    MessageFlags
+    MessageFlags,
+    AuditLogEvent
 } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
@@ -338,7 +339,7 @@ const LOG_CHANNEL_ID = '1483480300112842874';
 const MOD_LOG_CHANNEL_ID = '1484873046459158688';
 const GUILD_ID = process.env.GUILD_ID || '1483226900016009427';
 
-const logToDiscord = async (title, description, fields = [], color = 0xFFFFFF) => {
+const logToDiscord = async (title, description, fields = [], color = 0xFFFFFF, imageUrl = null) => {
     try {
         const guild = client.guilds.cache.get(GUILD_ID) || client.guilds.cache.first();
         if (!guild) return;
@@ -350,6 +351,9 @@ const logToDiscord = async (title, description, fields = [], color = 0xFFFFFF) =
                 .addFields(fields)
                 .setColor(color)
                 .setTimestamp();
+            
+            if (imageUrl) embed.setImage(imageUrl);
+                
             await channel.send({ embeds: [embed] });
         }
     } catch (err) {
@@ -383,15 +387,57 @@ const logModAction = async (title, staff, target, action, reason, color = 0xFFFF
 };
 
 client.on('messageDelete', async (message) => {
-    if (message.author?.bot) return;
-    logToDiscord(
-        '🗑️ Message Supprimé',
-        `Un message de ${message.author || 'Inconnu'} a été supprimé dans ${message.channel}.`,
-        [
-            { name: 'Contenu', value: message.content || '*Contenu non textuel*' }
-        ],
-        0xFF0000
-    );
+    try {
+        if (message.author?.bot) return;
+
+        // Give a little time for the audit log to update
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        let executor = null;
+        try {
+            const fetchedLogs = await message.guild.fetchAuditLogs({
+                limit: 1,
+                type: AuditLogEvent.MessageDelete,
+            });
+            const deletionLog = fetchedLogs.entries.first();
+
+            if (deletionLog) {
+                const { executor: logExecutor, target, createdTimestamp } = deletionLog;
+                // Check if the log is recent (within 5 seconds) and matches the target
+                if (target.id === message.author?.id && (Date.now() - createdTimestamp) < 5000) {
+                    executor = logExecutor;
+                }
+            }
+        } catch (auditError) {
+            console.error('Erreur Audit Logs:', auditError);
+        }
+
+        const fields = [
+            { name: '📍 Salon', value: `${message.channel}`, inline: true },
+            { name: '👤 Auteur', value: `${message.author || 'Inconnu'} (${message.author?.id || 'ID Inconnu'})`, inline: true },
+            { name: '🗑️ Supprimé par', value: executor ? `${executor} (${executor.id})` : `${message.author || 'L\'auteur'}`, inline: true },
+            { name: '💬 Contenu', value: message.content || '*Contenu non textuel ou ancien message non mis en cache*' }
+        ];
+
+        let imageUrl = null;
+        if (message.attachments.size > 0) {
+            const attachment = message.attachments.first();
+            if (attachment.contentType?.startsWith('image/')) {
+                imageUrl = attachment.proxyURL || attachment.url;
+                fields.push({ name: '🖼️ Image', value: 'Image récupérée (si encore disponible sur le CDN Discord)' });
+            }
+        }
+
+        logToDiscord(
+            '🗑️ Message Supprimé',
+            `Un message a été supprimé.`,
+            fields,
+            0xFF0000,
+            imageUrl
+        );
+    } catch (error) {
+        console.error('Erreur event messageDelete:', error);
+    }
 });
 
 client.on('guildMemberRemove', async (member) => {
@@ -1441,6 +1487,42 @@ client.on('messageCreate', async (message) => {
         logModAction('🔍 Vérification', message.author, targetUser, 'Ouverture Ticket Verif', 'Manuel', 0x0000FF, message.channel);
     }
 
+    // Command: -signaler
+    if (command === 'signaler') {
+        let targetUser = await getUser(args[0]);
+        let targetMsg = null;
+
+        // Check for reply
+        if (message.reference) {
+            targetMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
+            if (targetMsg) targetUser = targetMsg.author;
+        }
+
+        if (!targetUser) {
+            return message.reply('❌ Usage: `-signaler @user`, `-signaler <ID>` ou répondez à un message avec `-signaler`.');
+        }
+
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle('🛡️ Signalement d\'Utilisateur')
+            .setDescription(`Vous êtes sur le point de signaler **${targetUser.tag}**.\n\nVeuillez sélectionner la raison de votre signalement dans le menu ci-dessous pour que le staff puisse intervenir.`)
+            .setFooter({ text: 'Tout abus sera sanctionné.' });
+
+        const select = new StringSelectMenuBuilder()
+            .setCustomId(`report_${targetUser.id}_${targetMsg ? targetMsg.id : 'none'}`)
+            .setPlaceholder('Sélectionner une raison...')
+            .addOptions(
+                new StringSelectMenuOptionBuilder().setLabel('Pédophilie / Contenu inapproprié').setValue('pedophile').setEmoji('🔞'),
+                new StringSelectMenuOptionBuilder().setLabel('Scam / Arnaque / Spam').setValue('scam').setEmoji('💸'),
+                new StringSelectMenuOptionBuilder().setLabel('Mineur sur le serveur').setValue('mineur').setEmoji('👶'),
+                new StringSelectMenuOptionBuilder().setLabel('Contenu Illégal (Leak/Dox/etc)').setValue('illegal').setEmoji('⚖️'),
+                new StringSelectMenuOptionBuilder().setLabel('Insultes / Harcèlement').setValue('insulte').setEmoji('🤬')
+            );
+
+        const row = new ActionRowBuilder().addComponents(select);
+        await message.reply({ embeds: [embed], components: [row] });
+    }
+
     // Command: -unban
     if (command === 'unban') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.BanMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
@@ -1695,6 +1777,67 @@ client.on('interactionCreate', async (interaction) => {
 
                 const row = new ActionRowBuilder().addComponents(select);
                 return await interaction.update({ embeds: [embed], components: [row] });
+            }
+
+            if (action === 'report') {
+                const [targetId, msgId] = interaction.customId.split('_').slice(1);
+                const reasonKey = interaction.values[0];
+                const targetUser = await client.users.fetch(targetId).catch(() => null);
+                
+                const reasonLabels = {
+                    pedophile: '🔞 Pédophilie / Contenu inapproprié',
+                    scam: '💸 Scam / Arnaque / Spam',
+                    mineur: '👶 Mineur sur le serveur',
+                    illegal: '⚖️ Contenu Illégal',
+                    insulte: '🤬 Insultes / Harcèlement'
+                };
+
+                let targetMsg = null;
+                if (msgId !== 'none') {
+                    targetMsg = await interaction.channel.messages.fetch(msgId).catch(() => null);
+                }
+
+                const REPORT_LOG_CHANNEL_ID = '1484856441780306052';
+                const logChannel = interaction.guild.channels.cache.get(REPORT_LOG_CHANNEL_ID) || await interaction.guild.channels.fetch(REPORT_LOG_LOG_CHANNEL_ID).catch(() => null);
+
+                if (logChannel) {
+                    const embed = new EmbedBuilder()
+                        .setColor(0xFF0000)
+                        .setTitle('🚨 NOUVEAU SIGNALEMENT')
+                        .setThumbnail(targetUser?.displayAvatarURL({ dynamic: true }))
+                        .addFields(
+                            { name: '👤 Utilisateur signalé', value: `${targetUser} (\`${targetUser?.id}\`)`, inline: true },
+                            { name: '👤 Rapporteur', value: `${interaction.user} (\`${interaction.user.id}\`)`, inline: true },
+                            { name: '⚖️ Raison du signalement', value: `**${reasonLabels[reasonKey] || reasonKey}**`, inline: false },
+                            { name: '📍 Salon', value: `${interaction.channel} (\`${interaction.channel.id}\`)`, inline: true },
+                            { name: '🔗 Source', value: targetMsg ? `[Lien vers le message](${targetMsg.url})` : 'Mention Directe / ID', inline: true }
+                        )
+                        .setTimestamp();
+
+                    if (targetMsg) {
+                        if (targetMsg.content) {
+                            embed.addFields({ name: '💬 Contenu du message', value: `\`\`\`${targetMsg.content.substring(0, 1000)}\`\`\`` });
+                        }
+                        if (targetMsg.attachments.size > 0) {
+                            const firstAttachment = targetMsg.attachments.first();
+                            if (firstAttachment.contentType?.startsWith('image/')) {
+                                embed.setImage(firstAttachment.url);
+                            }
+                            embed.addFields({ name: '📎 Pièces jointes', value: `${targetMsg.attachments.size} fichier(s) détecté(s)` });
+                        }
+                        
+                        // Delete the reported message automatically as requested
+                        await targetMsg.delete().catch(() => {});
+                    }
+
+                    await logChannel.send({ content: `@here Nouveau signalement reçu ! (Message supprimé automatiquement)`, embeds: [embed] });
+                }
+
+                return await interaction.update({ 
+                    content: '✅ **Merci !** Votre signalement a été transmis en toute confidentialité au staff pour analyse.', 
+                    embeds: [], 
+                    components: [] 
+                });
             }
 
             if (action === 'muteduration') {

@@ -640,6 +640,14 @@ client.on('messageCreate', async (message) => {
     try {
     if (message.author.bot) return;
 
+    // --- ATTACHMENT WARNING SYSTEM ---
+    // REMPLACER 'ID_DU_SALON' PAR L'ID DU SALON DANS LEQUEL APPLIQUER CET AVERTISSEMENT
+    const WARNING_CHANNEL_ID = '1483474373573742612'; 
+    if (message.channel.id === WARNING_CHANNEL_ID && message.attachments.size > 0) {
+        await message.reply("Tout envoi de mineur sera sanctionné d'un bannissement immédiat.");
+    }
+    // ---------------------------------
+
     // --- ANTI-RAID SYSTEM ---
     if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
         // 1. Anti-Invite

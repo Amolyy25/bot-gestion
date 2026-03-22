@@ -332,10 +332,11 @@ client.on('inviteDelete', (invite) => {
 
 const LOG_CHANNEL_ID = '1483480300112842874';
 const MOD_LOG_CHANNEL_ID = '1484873046459158688';
+const GUILD_ID = process.env.GUILD_ID || '1483226900016009427';
 
 const logToDiscord = async (title, description, fields = [], color = 0xFFFFFF) => {
     try {
-        const guild = client.guilds.cache.first();
+        const guild = client.guilds.cache.get(GUILD_ID) || client.guilds.cache.first();
         if (!guild) return;
         const channel = await guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
         if (channel) {

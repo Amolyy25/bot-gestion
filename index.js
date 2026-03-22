@@ -152,6 +152,7 @@ const PREFIX = process.env.PREFIX || '-';
 const spamMap = new Collection();
 const guildInvites = new Collection();
 const ticketQueue = new Collection(); // In-memory fallback if needed
+const camInfractions = new Collection();
 // Removed JSON file setup - now using PostgreSQL
 
 // --- EXPRESS SERVER CONFIG ---
@@ -272,6 +273,51 @@ client.once('ready', async (c) => {
             console.log(`Impossible de récupérer les invitations pour ${guild.id}`);
         }
     }
+
+    // Giveaway Interval Checker
+    setInterval(async () => {
+        try {
+            const now = Date.now();
+            const res = await db.query('SELECT * FROM giveaways WHERE ended = FALSE AND end_time <= $1', [now]);
+            for (const row of res.rows) {
+                await db.query('UPDATE giveaways SET ended = TRUE WHERE message_id = $1', [row.message_id]);
+                
+                try {
+                    const guild = client.guilds.cache.get(row.guild_id);
+                    if (!guild) continue;
+                    const channel = await guild.channels.fetch(row.channel_id).catch(() => null);
+                    if (!channel) continue;
+                    const message = await channel.messages.fetch(row.message_id).catch(() => null);
+                    if (!message) continue;
+
+                    let participants = row.participants || [];
+                    let winnersText = "Personne n'a participé.";
+                    if (participants.length > 0) {
+                        const winCount = Math.min(row.winners_count, participants.length);
+                        const winners = [];
+                        for(let i=0; i<winCount; i++) {
+                            const randomIndex = Math.floor(Math.random() * participants.length);
+                            winners.push(participants[randomIndex]);
+                            participants.splice(randomIndex, 1);
+                        }
+                        winnersText = winners.map(id => `<@${id}>`).join(', ');
+                    }
+
+                    const embed = EmbedBuilder.from(message.embeds[0])
+                        .setTitle('🎉 Giveaway Terminé ! 🎉')
+                        .setDescription(`**Lot :** ${row.prize}\n\n**Gagnant(s) :** ${winnersText}`)
+                        .setColor(0x808080);
+                    
+                    await message.edit({ embeds: [embed], components: [] }).catch(() => null);
+                    if (winnersText !== "Personne n'a participé.") {
+                        await message.reply(`Félicitations à ${winnersText} qui remporte(nt) **${row.prize}** !`);
+                    } else {
+                        await message.reply(`Personne n'a participé au giveaway pour **${row.prize}**. 😿`);
+                    }
+                } catch(e) { }
+            }
+        } catch(err) { logError(err, 'Giveaway Interval'); }
+    }, 15000);
 });
 
 client.on('inviteCreate', (invite) => {
@@ -677,6 +723,42 @@ client.on('messageCreate', async (message) => {
         );
         return true;
     };
+
+    // Command: -setupvocal
+    if (command === 'setupvocal') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+        
+        try {
+            const category = await message.guild.channels.create({
+                name: '🎙️ VOCAUX',
+                type: ChannelType.GuildCategory
+            });
+
+            const vocauxConfig = [
+                { name: '🏯・Vocal 1' },
+                { name: '🏮・Vocal 2' },
+                { name: '⛩️・Vocal 3' },
+                { name: '🌸・Vocal 4' },
+                { name: '🎋・Vocal 5' }
+            ];
+
+            for (const v of vocauxConfig) {
+                await message.guild.channels.create({
+                    name: v.name,
+                    type: ChannelType.GuildVoice,
+                    parent: category.id
+                });
+            }
+
+            const embed = new EmbedBuilder()
+                .setColor(0xFFFFFF)
+                .setDescription('Les 5 salons vocaux ont été créés avec succès.');
+            message.channel.send({ embeds: [embed] });
+        } catch (err) {
+            logError(err, 'Command: -setupvocal');
+            message.reply('Erreur lors de la création des vocaux.');
+        }
+    }
 
     // Command: -setupstaff
     if (command === 'setupstaff') {
@@ -1110,6 +1192,34 @@ client.on('messageCreate', async (message) => {
         message.channel.send(`✅ Synchronisation terminée ! **${synced}** entrées mises à jour.`);
     }
 
+    // Command: -giveaways
+    if (command === 'giveaways' || command === 'giveaway') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
+        
+        const allowed = await checkQuota(message.author.id, 'giveaway', 1, 86400000); // 1 per 24h
+        if (!allowed && !message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+            return message.reply('⚠️ **Alerte Quota** : Vous avez déjà lancé un giveaway aujourd\'hui (limite de 1 par jour).');
+        }
+
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle('🎁 Créateur de Giveaway')
+            .setDescription('Configurez votre giveaway. Utilisez les boutons ci-dessous.');
+
+        // On initalize les donnés dans interactionCreate plus bas dynamiquement
+        const row1 = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('set_gw_prize').setLabel('Lot').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('set_gw_desc').setLabel('Description').setStyle(ButtonStyle.Secondary)
+        );
+        const row2 = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('set_gw_duration').setLabel('Durée (Ex: 10m, 2h, 1d)').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('set_gw_winners').setLabel('Nb. Gagnants').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('launch_gw').setLabel('Lancer 🎉').setStyle(ButtonStyle.Success)
+        );
+
+        await message.channel.send({ embeds: [embed], components: [row1, row2] });
+    }
+
     // Command: -create
     if (command === 'create') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
@@ -1208,6 +1318,76 @@ client.on('messageCreate', async (message) => {
         }, 9000);
     }
 
+    // Command: -vmute (Vocal Mute)
+    if (command === 'vmute') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
+        const target = await getMember(args[0]);
+        if (!target) return message.reply('Usage: -vmute @user/ID');
+        if (!target.voice.channel) return message.reply('Cet utilisateur n\'est pas dans un salon vocal.');
+        
+        await target.voice.setMute(true, `Mute vocal par ${message.author.tag}`);
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setDescription(`${target} a été rendu muet (micro coupé) dans le salon vocal.`);
+        message.channel.send({ embeds: [embed] });
+    }
+
+    // Command: -vunmute (Vocal Unmute)
+    if (command === 'vunmute') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
+        const target = await getMember(args[0]);
+        if (!target) return message.reply('Usage: -vunmute @user/ID');
+        if (!target.voice.channel) return message.reply('Cet utilisateur n\'est pas dans un salon vocal.');
+        
+        await target.voice.setMute(false, `Unmute vocal par ${message.author.tag}`);
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setDescription(`${target} a de nouveau accès à son micro dans le salon vocal.`);
+        message.channel.send({ embeds: [embed] });
+    }
+
+    // Command: -vdeaf (Vocal Deafen)
+    if (command === 'vdeaf') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
+        const target = await getMember(args[0]);
+        if (!target) return message.reply('Usage: -vdeaf @user/ID');
+        if (!target.voice.channel) return message.reply('Cet utilisateur n\'est pas dans un salon vocal.');
+        
+        await target.voice.setDeaf(true, `Deafen vocal par ${message.author.tag}`);
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setDescription(`${target} a été assourdi (ne peut plus entendre) dans le salon vocal.`);
+        message.channel.send({ embeds: [embed] });
+    }
+
+    // Command: -vundeaf (Vocal Undeafen)
+    if (command === 'vundeaf') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
+        const target = await getMember(args[0]);
+        if (!target) return message.reply('Usage: -vundeaf @user/ID');
+        if (!target.voice.channel) return message.reply('Cet utilisateur n\'est pas dans un salon vocal.');
+        
+        await target.voice.setDeaf(false, `Undeafen vocal par ${message.author.tag}`);
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setDescription(`${target} n'est plus assourdi dans le salon vocal.`);
+        message.channel.send({ embeds: [embed] });
+    }
+
+    // Command: -vkick (Vocal Disconnect)
+    if (command === 'vkick') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
+        const target = await getMember(args[0]);
+        if (!target) return message.reply('Usage: -vkick @user/ID');
+        if (!target.voice.channel) return message.reply('Cet utilisateur n\'est pas dans un salon vocal.');
+        
+        await target.voice.disconnect(`Déconnexion vocale par ${message.author.tag}`);
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setDescription(`${target} a été expulsé du salon vocal.`);
+        message.channel.send({ embeds: [embed] });
+    }
+
     // Command: -warn
     if (command === 'warn') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
@@ -1283,8 +1463,52 @@ client.on('messageCreate', async (message) => {
     }
 });
 
+client.on('voiceStateUpdate', async (oldState, newState) => {
+    try {
+        if (!oldState.selfVideo && newState.selfVideo) {
+            const member = newState.member;
+            if (!member || member.user.bot) return;
+
+            if (member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
+            const count = (camInfractions.get(member.id) || 0) + 1;
+            camInfractions.set(member.id, count);
+
+            const channel = newState.channel;
+            await newState.disconnect();
+
+            const baseWarning = `${member}, vous avez été déconecté du salon vocal pour avoir mis votre caméra, en cas de récidive vous serez sanctionné.`;
+            
+            if (count === 1) {
+                const embed = new EmbedBuilder()
+                    .setColor(0xFFFFFF)
+                    .setDescription(baseWarning);
+                if (channel) await channel.send({ content: `${member}`, embeds: [embed] }).catch(() => {});
+            } 
+            else if (count === 2) {
+                await member.timeout(2 * 60 * 60 * 1000, 'Caméra en vocal (2e fois)').catch(() => {});
+                const embed = new EmbedBuilder()
+                    .setColor(0xFFFFFF)
+                    .setDescription(`⚠️ ${baseWarning}\n*(Sanction : Mute 2 Heures appliqué)*`);
+                if (channel) await channel.send({ content: `${member}`, embeds: [embed] }).catch(() => {});
+            } 
+            else if (count >= 3) {
+                await member.ban({ reason: 'Caméra en vocal (3ème fois)' }).catch(() => {});
+                const embed = new EmbedBuilder()
+                    .setColor(0xFFFFFF)
+                    .setDescription(`⛔ ${member} a été banni pour récidive de caméra en vocal.`);
+                if (channel) await channel.send({ embeds: [embed] }).catch(() => {});
+                camInfractions.delete(member.id);
+            }
+        }
+    } catch (error) {
+        logError(error, 'Event: voiceStateUpdate');
+    }
+});
+
 // Store temporary embed data
 const embedData = new Collection();
+const gwData = new Collection();
 
 // Interaction Handling (Buttons & Select Menus & Modals)
 client.on('interactionCreate', async (interaction) => {
@@ -1358,6 +1582,20 @@ client.on('interactionCreate', async (interaction) => {
                 embedData.set(userId, data);
                 return await interaction.reply({ content: 'Valeur mise à jour !', flags: [MessageFlags.Ephemeral] });
             }
+
+            const gwModalTypes = ['gwTitle', 'gwDesc', 'gwTime', 'gwWinners'];
+            if (gwModalTypes.includes(type)) {
+                let data = gwData.get(userId) || {};
+                const value = interaction.fields.getTextInputValue('input');
+
+                if (type === 'gwTitle') data.prize = value;
+                if (type === 'gwDesc') data.description = value;
+                if (type === 'gwTime') data.time = value;
+                if (type === 'gwWinners') data.winners = parseInt(value) || 1;
+
+                gwData.set(userId, data);
+                return await interaction.reply({ content: 'Paramètre du giveaway mis à jour !', flags: [MessageFlags.Ephemeral] });
+            }
         }
 
         if (interaction.isStringSelectMenu()) {
@@ -1380,6 +1618,45 @@ client.on('interactionCreate', async (interaction) => {
                 await channel.send({ embeds: [embed] });
                 embedData.delete(interaction.user.id);
                 return await interaction.update({ content: `Embed envoyé dans ${channel} !`, embeds: [], components: [] });
+            }
+
+            if (action === 'gwlaunchChannel') {
+                const data = gwData.get(interaction.user.id);
+                if (!data) return interaction.reply({ content: 'Aucune donnée de giveaway trouvée.', flags: [MessageFlags.Ephemeral] });
+
+                const channel = interaction.guild.channels.cache.get(interaction.values[0]);
+                if (!channel) return interaction.reply({ content: 'Salon introuvable.', flags: [MessageFlags.Ephemeral] });
+
+                const match = data.time.match(/^(\d+)([smhd])$/);
+                let durationMs = 0;
+                const value = parseInt(match[1]);
+                const unit = match[2];
+                if (unit === 's') durationMs = value * 1000;
+                if (unit === 'm') durationMs = value * 60000;
+                if (unit === 'h') durationMs = value * 3600000;
+                if (unit === 'd') durationMs = value * 86400000;
+
+                const endTime = Date.now() + durationMs;
+
+                const embed = new EmbedBuilder()
+                    .setColor(0xFFFFFF)
+                    .setTitle(`🎉 GIVEAWAY: ${data.prize}`)
+                    .setDescription(`${data.description ? data.description + '\n\n' : ''}**Gagnants:** ${data.winners}\n**Se termine:** <t:${Math.floor(endTime / 1000)}:R>\n\nAppuyez sur le bouton 🎉 en dessous pour participer !`)
+                    .setFooter({ text: `${data.winners} Gagnant(s) | Lancé par ${interaction.user.tag}` });
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('gw_join').setLabel('🎉 Participer (0)').setStyle(ButtonStyle.Primary)
+                );
+
+                const msg = await channel.send({ embeds: [embed], components: [row] });
+                
+                await db.query(
+                    'INSERT INTO giveaways (message_id, channel_id, guild_id, prize, description, winners_count, end_time, ended, participants) VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8)',
+                    [msg.id, channel.id, interaction.guild.id, data.prize, data.description || '', data.winners, endTime, JSON.stringify([])]
+                );
+
+                gwData.delete(interaction.user.id);
+                return await interaction.update({ content: `Giveaway lancé dans ${channel} !`, embeds: [], components: [] });
             }
 
             const target = await interaction.guild.members.fetch(targetId).catch(() => null);
@@ -1503,6 +1780,81 @@ client.on('interactionCreate', async (interaction) => {
                     .addOptions(channels.map(c => ({ label: c.name, value: c.id })));
 
                 return await interaction.reply({ content: 'Sélectionnez le salon d\'envoi :', components: [new ActionRowBuilder().addComponents(select)], flags: [MessageFlags.Ephemeral] });
+            }
+
+            if (['set_gw_prize', 'set_gw_desc', 'set_gw_duration', 'set_gw_winners'].includes(interaction.customId)) {
+                const typeMap = {
+                    set_gw_prize: ['Lot (Titre)', 'gwTitle', TextInputStyle.Short],
+                    set_gw_desc: ['Description', 'gwDesc', TextInputStyle.Paragraph],
+                    set_gw_duration: ['Durée (ex: 10m, 2h, 1d)', 'gwTime', TextInputStyle.Short],
+                    set_gw_winners: ['Nombre de Gagnants', 'gwWinners', TextInputStyle.Short]
+                };
+
+                const [label, modalType, style] = typeMap[interaction.customId];
+                const modal = new ModalBuilder()
+                    .setCustomId(`${modalType}_${userId}`)
+                    .setTitle(`Configurer : ${label}`);
+
+                const input = new TextInputBuilder()
+                    .setCustomId('input')
+                    .setLabel(label)
+                    .setStyle(style)
+                    .setRequired(true);
+
+                modal.addComponents(new ActionRowBuilder().addComponents(input));
+                return await interaction.showModal(modal);
+            }
+
+            if (interaction.customId === 'launch_gw') {
+                const data = gwData.get(userId);
+                if (!data || !data.prize || !data.time || !data.winners) {
+                    return interaction.reply({ content: 'Le lot, la durée et le nombre de gagnants sont obligatoires pour lancer le giveaway.', flags: [MessageFlags.Ephemeral] });
+                }
+
+                const match = data.time.match(/^(\d+)([smhd])$/);
+                if (!match) return interaction.reply({ content: 'Format de durée invalide. Utilisez s, m, h ou d (ex: 10m, 2h).', flags: [MessageFlags.Ephemeral] });
+
+                const channels = interaction.guild.channels.cache
+                    .filter(c => c.type === ChannelType.GuildText)
+                    .first(25);
+
+                const select = new StringSelectMenuBuilder()
+                    .setCustomId(`gwlaunchChannel_${userId}`)
+                    .setPlaceholder('Choisir le salon...')
+                    .addOptions(channels.map(c => ({ label: c.name, value: c.id })));
+
+                return await interaction.reply({ content: 'Sélectionnez le salon où lancer le Giveaway :', components: [new ActionRowBuilder().addComponents(select)], flags: [MessageFlags.Ephemeral] });
+            }
+
+            if (interaction.customId === 'gw_join') {
+                const msgId = interaction.message.id;
+                
+                const res = await db.query('SELECT participants FROM giveaways WHERE message_id = $1 AND ended = FALSE', [msgId]);
+                if (res.rows.length === 0) {
+                    return interaction.reply({ content: 'Ce giveaway est terminé ou introuvable.', flags: [MessageFlags.Ephemeral] });
+                }
+
+                let participants = res.rows[0].participants || [];
+                if (participants.includes(userId)) {
+                    participants = participants.filter(id => id !== userId);
+                    await db.query('UPDATE giveaways SET participants = $1 WHERE message_id = $2', [JSON.stringify(participants), msgId]);
+
+                    const newRow = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId('gw_join').setLabel(`🎉 Participer (${participants.length})`).setStyle(ButtonStyle.Primary)
+                    );
+                    await interaction.message.edit({ components: [newRow] }).catch(()=>null);
+                    return interaction.reply({ content: 'Vous avez quitté le giveaway.', flags: [MessageFlags.Ephemeral] });
+                }
+
+                participants.push(userId);
+                await db.query('UPDATE giveaways SET participants = $1 WHERE message_id = $2', [JSON.stringify(participants), msgId]);
+
+                const newRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('gw_join').setLabel(`🎉 Participer (${participants.length})`).setStyle(ButtonStyle.Primary)
+                );
+                await interaction.message.edit({ components: [newRow] }).catch(()=>null);
+                
+                return interaction.reply({ content: 'Participation confirmée ! 🎉 Bonne chance.', flags: [MessageFlags.Ephemeral] });
             }
 
             if (interaction.customId.startsWith('open_ticket_')) {

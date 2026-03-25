@@ -2,7 +2,6 @@
   "version": 2,
   "name": "doro-place-site",
   "public": true,
-  "cleanUrls": true,
   "rewrites": [
     { "source": "/(.*)", "destination": "/public/$1" }
   ]

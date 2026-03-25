@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conditions Générales - Doro Place</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        .terms-wrapper {
+            background-color: var(--bg-left);
+            min-height: 100vh;
+            padding: 60px 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .terms-container {
+            background: #fff;
+            max-width: 800px;
+            width: 100%;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+            padding: 60px 80px;
+            border: 1px solid var(--border-color);
+        }
+        .terms-header {
+            text-align: center;
+            margin-bottom: 50px;
+        }
+        .terms-header h1 {
+            font-size: 32px;
+            color: var(--text-dark);
+            margin-bottom: 12px;
+        }
+        .terms-header p {
+            color: var(--text-muted);
+            font-size: 16px;
+        }
+        .terms-content h2 {
+            font-size: 20px;
+            margin: 32px 0 16px;
+            color: var(--text-dark);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .terms-content h2 svg {
+            color: var(--stripe-purple);
+        }
+        .terms-content p {
+            color: var(--text-muted);
+            line-height: 1.7;
+            margin-bottom: 16px;
+            font-size: 15px;
+        }
+        .back-nav {
+            margin-bottom: 40px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-muted);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+        .back-nav:hover {
+            color: var(--text-dark);
+        }
+        @media (max-width: 768px) {
+            .terms-container {
+                padding: 40px 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="terms-wrapper">
+        <div class="terms-container">
+            <a href="/" class="back-nav">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                Retour au paiement
+            </a>
+
+            <div class="terms-header">
+                <h1>Conditions Générales de Vente</h1>
+                <p>Découvrez les modalités de votre accès VIP sur Doro Place.</p>
+            </div>
+
+            <div class="terms-content">
+                <h2>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                    Nature du Service
+                </h2>
+                <p>En effectuant un achat sur cette page, vous obtenez un accès VIP dématérialisé sur le serveur communautaire Doro Place. L'achat est unique (sans abonnement) et vous confère des avantages détaillés sur notre serveur.</p>
+
+                <h2>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                    Non-conservation des Données Bancaires
+                </h2>
+                <p>Les paiements sont chiffrés et directement orchestrés de bout en bout par l'infrastructure mondiale spécialisée de notre processeur de paiement (Stripe). Notre plateforme informatique n'a techniquement pas la possibilité de voir ni de sauvegarder les numéros complets de vos cartes. Vous avez la garantie d'une entière confidentialité.</p>
+
+                <h2>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+                    Politique de Remboursement
+                </h2>
+                <p>En raison de la nature numérique et instantanée de l'accès VIP accordé lors de la vérification de votre achat, le droit de rétractation traditionnel ne s'applique pas. Cependant, notre équipe de support s'engage à résoudre le moindre de vos problèmes en ouvrant un ticket sur notre serveur Discord.</p>
+
+                <p style="margin-top: 40px; font-size: 14px; text-align: center;">Dernière mise à jour : 25 Mars 2026</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

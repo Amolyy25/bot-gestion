@@ -150,6 +150,7 @@ body {
 
 input[type="text"],
 input[type="email"],
+input[type="tel"],
 select {
     width: 100%;
     padding: 12px 14px;
@@ -338,6 +339,23 @@ input:focus, select:focus {
 .pay-btn:disabled {
     background: #d1d5db;
     cursor: not-allowed;
+}
+
+/* SECURITY MENTION */
+.secure-mention {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 400;
+    text-align: center;
+}
+
+.secure-mention svg {
+    flex-shrink: 0;
 }
 
 /* FOOTER */

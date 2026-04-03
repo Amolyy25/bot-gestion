@@ -26,6 +26,7 @@ const bodyParser = require('body-parser');
 const axios = require('axios');
 const TelegramBot = require('node-telegram-bot-api');
 const db = require('./lib/db');
+const soutienStatus = require('./soutien-status');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -145,9 +146,12 @@ const client = new Client({
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildInvites,
+        GatewayIntentBits.GuildPresences,
     ],
     partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
+
+soutienStatus.init(client);
 
 const PREFIX = process.env.PREFIX || '-';
 const spamMap = new Collection();

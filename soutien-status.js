@@ -1,8 +1,5 @@
-const { EmbedBuilder } = require('discord.js');
-
 // ─── Configuration ───────────────────────────────────────────────
 const ROLE_SOUTIEN_ID = '1489729337191305439';      // ID du rôle "Soutien"
-const GENERAL_CHANNEL_ID = '1483231963308494920';   // ID du salon général
 const GUILD_ID = '1483226900016009427';             // ID du serveur
 const SCAN_INTERVAL = 5 * 60 * 1000;       // 5 minutes
 
@@ -51,9 +48,8 @@ async function hasValidInvite(client, codes) {
 
 /**
  * Traite un membre : attribue ou retire le rôle Soutien.
- * @param {boolean} announce - Si true, envoie un embed de félicitations.
  */
-async function processMember(client, member, announce = true) {
+async function processMember(client, member) {
     const statusText = getCustomStatusText(member.presence);
     const codes = extractInviteCodes(statusText);
     const hasRole = member.roles.cache.has(ROLE_SOUTIEN_ID);
@@ -62,18 +58,6 @@ async function processMember(client, member, announce = true) {
         const valid = await hasValidInvite(client, codes);
         if (valid && !hasRole) {
             await member.roles.add(ROLE_SOUTIEN_ID).catch(console.error);
-            if (announce) {
-                const channel = client.channels.cache.get(GENERAL_CHANNEL_ID);
-                if (channel) {
-                    const embed = new EmbedBuilder()
-                        .setColor(0x57F287)
-                        .setTitle('Merci pour ton soutien !')
-                        .setDescription(`${member} a ajouté un lien d'invitation du serveur dans son statut et obtient le rôle <@&${ROLE_SOUTIEN_ID}> ! Rend toi ici <#1489729747901743195> pour avoir des nudes gratuit de <@1172869002670903422> et <@1285621421304971285>`)
-                        .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
-                        .setTimestamp();
-                    channel.send({ embeds: [embed] }).catch(console.error);
-                }
-            }
             console.log(`[Soutien] Rôle ajouté à ${member.user.tag}`);
         } else if (!valid && hasRole) {
             await member.roles.remove(ROLE_SOUTIEN_ID).catch(console.error);
@@ -97,7 +81,7 @@ async function scanAllMembers(client) {
 
     for (const [, member] of members) {
         if (member.user.bot) continue;
-        await processMember(client, member, false);
+        await processMember(client, member);
     }
     console.log('[Soutien] Scan terminé.');
 }
@@ -118,7 +102,7 @@ function init(client) {
         // Ne traiter que si le Custom Status a changé
         if (oldText === newText) return;
 
-        await processMember(client, newPresence.member, true);
+        await processMember(client, newPresence.member);
     });
 
     // Scan initial au démarrage + scan périodique

@@ -9,8 +9,9 @@ const {
     ButtonStyle, 
     PermissionsBitField,
     Collection,
-    StringSelectMenuBuilder,
     StringSelectMenuOptionBuilder,
+    ChannelSelectMenuBuilder,
+    RoleSelectMenuBuilder,
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
@@ -1300,10 +1301,13 @@ client.on('messageCreate', async (message) => {
         const row2 = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('set_gw_duration').setLabel('Durée (Ex: 10m, 2h, 1d)').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('set_gw_winners').setLabel('Nb. Gagnants').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('set_gw_condition').setLabel('Condition : Rôle').setStyle(ButtonStyle.Secondary)
+        );
+        const row3 = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('launch_gw').setLabel('Lancer 🎉').setStyle(ButtonStyle.Success)
         );
 
-        await message.channel.send({ embeds: [embed], components: [row1, row2] });
+        await message.channel.send({ embeds: [embed], components: [row1, row2, row3] });
     }
 
     // Command: -create
@@ -1756,6 +1760,14 @@ client.on('interactionCreate', async (interaction) => {
         if (interaction.isStringSelectMenu()) {
             const [action, targetId] = interaction.customId.split('_');
             
+            if (action === 'gwCondition') {
+                const data = gwData.get(interaction.user.id) || {};
+                data.required_role = interaction.values[0];
+                gwData.set(interaction.user.id, data);
+                const role = interaction.guild.roles.cache.get(data.required_role);
+                return await interaction.reply({ content: `Condition mise à jour : Rôle requis **${role ? role.name : data.required_role}** !`, flags: [MessageFlags.Ephemeral] });
+            }
+
             if (action === 'sendToChannel') {
                 const data = embedData.get(interaction.user.id);
                 if (!data) return interaction.reply({ content: 'Aucune donnée d\'embed trouvée.', flags: [MessageFlags.Ephemeral] });
@@ -1793,10 +1805,11 @@ client.on('interactionCreate', async (interaction) => {
 
                 const endTime = Date.now() + durationMs;
 
+                const role = data.required_role ? interaction.guild.roles.cache.get(data.required_role) : null;
                 const embed = new EmbedBuilder()
                     .setColor(0xFFFFFF)
                     .setTitle(`🎉 GIVEAWAY: ${data.prize}`)
-                    .setDescription(`${data.description ? data.description + '\n\n' : ''}**Gagnants:** ${data.winners}\n**Se termine:** <t:${Math.floor(endTime / 1000)}:R>\n\nAppuyez sur le bouton 🎉 en dessous pour participer !`)
+                    .setDescription(`${data.description ? data.description + '\n\n' : ''}**Gagnants:** ${data.winners}\n**Se termine:** <t:${Math.floor(endTime / 1000)}:R>\n\n${role ? `⚠️ **Condition:** Avoir le rôle ${role}\n\n` : ''}Appuyez sur le bouton 🎉 en dessous pour participer !`)
                     .setFooter({ text: `${data.winners} Gagnant(s) | Lancé par ${interaction.user.tag}` });
 
                 const row = new ActionRowBuilder().addComponents(
@@ -1806,8 +1819,8 @@ client.on('interactionCreate', async (interaction) => {
                 const msg = await channel.send({ embeds: [embed], components: [row] });
                 
                 await db.query(
-                    'INSERT INTO giveaways (message_id, channel_id, guild_id, prize, description, winners_count, end_time, ended, participants) VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8)',
-                    [msg.id, channel.id, interaction.guild.id, data.prize, data.description || '', data.winners, endTime, JSON.stringify([])]
+                    'INSERT INTO giveaways (message_id, channel_id, guild_id, prize, description, winners_count, end_time, ended, participants, required_role_id) VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9)',
+                    [msg.id, channel.id, interaction.guild.id, data.prize, data.description || '', data.winners, endTime, JSON.stringify([]), data.required_role || null]
                 );
 
                 gwData.delete(interaction.user.id);
@@ -1986,14 +1999,10 @@ client.on('interactionCreate', async (interaction) => {
                     return interaction.reply({ content: 'L\'embed doit avoir au moins un titre ou une description.', flags: [MessageFlags.Ephemeral] });
                 }
 
-                const channels = interaction.guild.channels.cache
-                    .filter(c => c.type === ChannelType.GuildText)
-                    .first(25);
-
-                const select = new StringSelectMenuBuilder()
+                const select = new ChannelSelectMenuBuilder()
                     .setCustomId(`sendToChannel_${userId}`)
                     .setPlaceholder('Choisir le salon...')
-                    .addOptions(channels.map(c => ({ label: c.name, value: c.id })));
+                    .addChannelTypes(ChannelType.GuildText);
 
                 return await interaction.reply({ content: 'Sélectionnez le salon d\'envoi :', components: [new ActionRowBuilder().addComponents(select)], flags: [MessageFlags.Ephemeral] });
             }
@@ -2021,6 +2030,14 @@ client.on('interactionCreate', async (interaction) => {
                 return await interaction.showModal(modal);
             }
 
+            if (interaction.customId === 'set_gw_condition') {
+                const select = new RoleSelectMenuBuilder()
+                    .setCustomId(`gwCondition_${userId}`)
+                    .setPlaceholder('Choisir le rôle requis...');
+
+                return await interaction.reply({ content: 'Sélectionnez le rôle nécessaire pour participer :', components: [new ActionRowBuilder().addComponents(select)], flags: [MessageFlags.Ephemeral] });
+            }
+
             if (interaction.customId === 'launch_gw') {
                 const data = gwData.get(userId);
                 if (!data || !data.prize || !data.time || !data.winners) {
@@ -2030,14 +2047,10 @@ client.on('interactionCreate', async (interaction) => {
                 const match = data.time.match(/^(\d+)([smhd])$/);
                 if (!match) return interaction.reply({ content: 'Format de durée invalide. Utilisez s, m, h ou d (ex: 10m, 2h).', flags: [MessageFlags.Ephemeral] });
 
-                const channels = interaction.guild.channels.cache
-                    .filter(c => c.type === ChannelType.GuildText)
-                    .first(25);
-
-                const select = new StringSelectMenuBuilder()
+                const select = new ChannelSelectMenuBuilder()
                     .setCustomId(`gwlaunchChannel_${userId}`)
                     .setPlaceholder('Choisir le salon...')
-                    .addOptions(channels.map(c => ({ label: c.name, value: c.id })));
+                    .addChannelTypes(ChannelType.GuildText);
 
                 return await interaction.reply({ content: 'Sélectionnez le salon où lancer le Giveaway :', components: [new ActionRowBuilder().addComponents(select)], flags: [MessageFlags.Ephemeral] });
             }
@@ -2045,12 +2058,17 @@ client.on('interactionCreate', async (interaction) => {
             if (interaction.customId === 'gw_join') {
                 const msgId = interaction.message.id;
                 
-                const res = await db.query('SELECT participants FROM giveaways WHERE message_id = $1 AND ended = FALSE', [msgId]);
+                const res = await db.query('SELECT participants, required_role_id FROM giveaways WHERE message_id = $1 AND ended = FALSE', [msgId]);
                 if (res.rows.length === 0) {
                     return interaction.reply({ content: 'Ce giveaway est terminé ou introuvable.', flags: [MessageFlags.Ephemeral] });
                 }
 
-                let participants = res.rows[0].participants || [];
+                const row_data = res.rows[0];
+                if (row_data.required_role_id && !interaction.member.roles.cache.has(row_data.required_role_id)) {
+                    return interaction.reply({ content: `⚠️ Vous devez avoir le rôle <@&${row_data.required_role_id}> pour participer à ce giveaway. Pour l'avoir automatiquement, vous devez mettre le lien de notre serveur en status discord ! pas bio ! et vous mettres en ligne !`, flags: [MessageFlags.Ephemeral] });
+                }
+
+                let participants = row_data.participants || [];
                 if (participants.includes(userId)) {
                     participants = participants.filter(id => id !== userId);
                     await db.query('UPDATE giveaways SET participants = $1 WHERE message_id = $2', [JSON.stringify(participants), msgId]);

@@ -1203,6 +1203,102 @@ client.on('messageCreate', async (message) => {
         message.channel.send({ embeds: [embed] });
     }
 
+    // Command: -members
+    if (command === 'members') {
+        const humans = message.guild.members.cache.filter(m => !m.user.bot).size;
+        const bots = message.guild.members.cache.filter(m => m.user.bot).size;
+        const onlineCount = message.guild.members.cache.filter(m => m.presence?.status !== 'offline').size;
+
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle(`📊 Statistiques des Membres - ${message.guild.name}`)
+            .addFields(
+                { name: '👥 Total', value: `\`${message.guild.memberCount}\``, inline: true },
+                { name: '👤 Humains', value: `\`${humans}\``, inline: true },
+                { name: '🤖 Bots', value: `\`${bots}\``, inline: true },
+                { name: '🟢 En ligne', value: `\`${onlineCount}\``, inline: true }
+            )
+            .setThumbnail(message.guild.iconURL({ dynamic: true }))
+            .setFooter({ text: `Demandé par ${message.author.tag}`, iconURL: message.author.displayAvatarURL({ dynamic: true }) })
+            .setTimestamp();
+        message.channel.send({ embeds: [embed] });
+    }
+
+    // Command: -boost
+    if (command === 'boost') {
+        const guild = message.guild;
+        const embed = new EmbedBuilder()
+            .setColor(0xFF73FA) // Pink Boost Color
+            .setTitle(`💎 Soutien Boost - ${guild.name}`)
+            .setDescription(`Le serveur est actuellement au **niveau ${guild.premiumTier}** avec **${guild.premiumSubscriptionCount}** boosts.`)
+            .setThumbnail('https://cdn.discordapp.com/emojis/848580665963511808.png?v=1')
+            .setFooter({ text: `Merci à tous les boosters !` })
+            .setTimestamp();
+        message.channel.send({ embeds: [embed] });
+    }
+
+    // Command: -botinfo
+    if (command === 'botinfo' || command === 'bot') {
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle(`🤖 Informations sur le Bot`)
+            .setThumbnail(client.user.displayAvatarURL())
+            .addFields(
+                { name: '👑 Développeur', value: '`Doro Place Development`', inline: true },
+                { name: '📡 Latence', value: `\`${client.ws.ping}ms\``, inline: true },
+                { name: '📁 Serveurs', value: `\`${client.guilds.cache.size}\``, inline: true },
+                { name: '🛠️ Version', value: '`1.0.0`', inline: true },
+                { name: '📅 Créé le', value: `\`${client.user.createdAt.toLocaleDateString()}\``, inline: true }
+            )
+            .setTimestamp();
+        message.channel.send({ embeds: [embed] });
+    }
+
+    // Command: -uptime
+    if (command === 'uptime') {
+        let totalSeconds = (client.uptime / 1000);
+        let days = Math.floor(totalSeconds / 86400);
+        totalSeconds %= 86400;
+        let hours = Math.floor(totalSeconds / 3600);
+        totalSeconds %= 3600;
+        let minutes = Math.floor(totalSeconds / 60);
+        let seconds = Math.floor(totalSeconds % 60);
+
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle(`⏳ Temps de fonctionnement (Uptime)`)
+            .setDescription(`Le bot est en ligne depuis :\n\`${days}j ${hours}h ${minutes}m ${seconds}s\``)
+            .setTimestamp();
+        message.channel.send({ embeds: [embed] });
+    }
+
+    // Command: -icon
+    if (command === 'icon') {
+        const guild = message.guild;
+        if (!guild.iconURL()) return message.reply('Ce serveur n\'a pas d\'icône.');
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle(`Icône du serveur : ${guild.name}`)
+            .setImage(guild.iconURL({ dynamic: true, size: 1024 }));
+        message.channel.send({ embeds: [embed] });
+    }
+
+    // Command: -help
+    if (command === 'help' || command === 'aide') {
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle(`📜 Liste des Commandes`)
+            .setDescription(`Voici les commandes disponibles sur le serveur. Le préfixe est \`${PREFIX}\``)
+            .addFields(
+                { name: '📊 Général', value: '`members`, `boost`, `invites`, `botinfo`, `uptime`, `icon`, `signaler`' },
+                { name: '🛠️ Administration', value: '`serverinfo`, `userinfo`, `pic`, `banner`, `clear`, `lock`, `unlock`, `slowmode`, `ping`, `setupticket`, `setupvocal`, `setupstaff`, `syncinvites`, `create`, `setupcodes`, `tirage`' },
+                { name: '🛡️ Modération', value: '`kick`, `ban`, `bban`, `tempmute`, `mmute`, `warn`, `verif`, `vmute`, `vunmute`, `vdeaf`, `vundeaf`, `vkick`' }
+            )
+            .setFooter({ text: 'Doro Place - Bot de Gestion' })
+            .setTimestamp();
+        message.channel.send({ embeds: [embed] });
+    }
+
     // Command: -lock
     if (command === 'lock') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;

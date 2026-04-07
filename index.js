@@ -1290,7 +1290,7 @@ client.on('messageCreate', async (message) => {
             .setTitle(`📜 Liste des Commandes`)
             .setDescription(`Voici les commandes disponibles sur le serveur. Le préfixe est \`${PREFIX}\``)
             .addFields(
-                { name: '📊 Général', value: '`members`, `boost`, `invites`, `botinfo`, `uptime`, `icon`, `signaler`' },
+                { name: '📊 Général', value: '`members`, `boost`, `invites`, `leaderboard`, `lb`, `botinfo`, `uptime`, `icon`, `signaler`' },
                 { name: '🛠️ Administration', value: '`serverinfo`, `userinfo`, `pic`, `banner`, `clear`, `lock`, `unlock`, `slowmode`, `ping`, `setupticket`, `setupvocal`, `setupstaff`, `syncinvites`, `create`, `setupcodes`, `tirage`' },
                 { name: '🛡️ Modération', value: '`kick`, `ban`, `bban`, `tempmute`, `mmute`, `warn`, `verif`, `vmute`, `vunmute`, `vdeaf`, `vundeaf`, `vkick`' }
             )
@@ -1352,6 +1352,45 @@ client.on('messageCreate', async (message) => {
             .setTitle(`Invitations de ${target.user.tag}`)
             .setDescription(`Cet utilisateur possède **${activeInvites}** invitation${activeInvites > 1 ? 's' : ''} (membres actuellement sur le serveur).`);
         message.reply({ embeds: [embed] });
+    }
+
+    // Command: -leaderboard
+    if (command === 'leaderboard' || command === 'lb') {
+        const type = args[0] || 'invites';
+        
+        if (type === 'invites') {
+            const res = await db.query(`
+                SELECT inviter_id, COUNT(*) as invite_count 
+                FROM invites 
+                WHERE active = TRUE 
+                GROUP BY inviter_id 
+                ORDER BY invite_count DESC 
+                LIMIT 10
+            `);
+
+            if (res.rows.length === 0) {
+                return message.reply('Aucune donnée d\'invitation disponible.');
+            }
+
+            let description = "";
+            for (let i = 0; i < res.rows.length; i++) {
+                const row = res.rows[i];
+                const user = await client.users.fetch(row.inviter_id).catch(() => null);
+                const tag = user ? user.username : `ID: ${row.inviter_id}`;
+                description += `**${i + 1}.** ${tag} — \`${row.invite_count}\` invitation(s)\n`;
+            }
+
+            const embed = new EmbedBuilder()
+                .setColor(0xFFFFFF)
+                .setTitle('🏆 Classement des Invitations')
+                .setDescription(description || 'Aucun membre dans le classement.')
+                .setFooter({ text: 'Seules les invitations actives sont comptabilisées.' })
+                .setTimestamp();
+            
+            message.channel.send({ embeds: [embed] });
+        } else {
+            message.reply('Usage : `-leaderboard invites` ou `-lb invites`');
+        }
     }
 
     // Command: -syncinvites (Admin only)

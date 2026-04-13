@@ -1106,6 +1106,21 @@ client.on('messageCreate', async (message) => {
         logModAction('🔇 Sanction : Mute 24h', message.author, target, 'Mute 24h', 'Automatique 24h (-mmute)', 0xFFFF00, message.channel);
     }
 
+    // Command: -unmute
+    if (command === 'unmute') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
+        const target = await getMember(args[0]);
+        if (!target) return message.reply('Usage: -unmute @user/ID');
+        if (!target.isCommunicationDisabled()) return message.reply('Cet utilisateur n\'est pas mute.');
+
+        await target.timeout(null, `Unmute par ${message.author.tag}`);
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setDescription(`${target.user.tag} a été unmute.`);
+        message.channel.send({ embeds: [embed] });
+        logModAction('🔊 Sanction : Unmute', message.author, target, 'Unmute', 'Manuel', 0x00FF00, message.channel);
+    }
+
     // Command: -soumis
     if (command === 'soumis') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.ManageRoles) && !message.member.roles.cache.has('1483882841216385187')) return;
@@ -1443,7 +1458,7 @@ client.on('messageCreate', async (message) => {
             .addFields(
                 { name: '📊 Général', value: '`members`, `boost`, `invites`, `leaderboard`, `lb`, `botinfo`, `uptime`, `icon`, `signaler`' },
                 { name: '🛠️ Administration', value: '`serverinfo`, `userinfo`, `pic`, `banner`, `clear`, `lock`, `unlock`, `slowmode`, `ping`, `setupticket`, `setupvocal`, `setupstaff`, `syncinvites`, `create`, `setupcodes`, `tirage`' },
-                { name: '🛡️ Modération', value: '`kick`, `ban`, `bban`, `tempmute`, `mmute`, `warn`, `verif`, `vmute`, `vunmute`, `vdeaf`, `vundeaf`, `vkick`, `rollmod`' }
+                { name: '🛡️ Modération', value: '`kick`, `ban`, `bban`, `tempmute`, `mmute`, `unmute`, `warn`, `verif`, `vmute`, `vunmute`, `vdeaf`, `vundeaf`, `vkick`, `rollmod`' }
             )
             .setFooter({ text: 'Doro Place - Bot de Gestion' })
             .setTimestamp();

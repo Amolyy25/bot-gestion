@@ -389,6 +389,24 @@ const logToDiscord = async (title, description, fields = [], color = 0xFFFFFF, i
     }
 };
 
+const sendModDM = async (target, action, reason) => {
+    try {
+        const user = target.user || target;
+        const guild = target.guild || client.guilds.cache.get(GUILD_ID);
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle('Information de Modération')
+            .setDescription(`Vous avez reçu une sanction sur le serveur **${guild ? guild.name : 'Doro Place'}**.`)
+            .addFields(
+                { name: 'Action', value: action, inline: true },
+                { name: 'Raison', value: reason || 'Aucune raison spécifiée', inline: true }
+            );
+        await user.send({ embeds: [embed] }).catch(() => {});
+    } catch (err) {
+        // Ignore errors if DMs are closed
+    }
+};
+
 const logModAction = async (title, staff, target, action, reason, color = 0xFFFFFF, modChannel = null) => {
     try {
         const guild = client.guilds.cache.get(GUILD_ID);
@@ -732,6 +750,7 @@ client.on('messageCreate', async (message) => {
     const inviteRegex = /(discord\.(gg|io|me|li|link|xyz)|discordapp\.com\/invite|discord\.com\/invite)\/.+/i;
     if (inviteRegex.test(message.content)) {
         await message.delete().catch(() => {});
+        await sendModDM(message.member, 'Ban (Auto)', 'Anti-Raid : Invitation Discord');
         await message.member.ban({ reason: 'Anti-Raid : Invitation Discord' }).catch(() => {});
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
@@ -739,8 +758,19 @@ client.on('messageCreate', async (message) => {
         return message.channel.send({ embeds: [embed] });
     }
 
+    // 2. Anti-Bio Scam
+    if (message.content.toLowerCase().includes('# check my bio')) {
+        await message.delete().catch(() => {});
+        await sendModDM(message.member, 'Ban (Auto)', 'Anti-Raid : Contenu malveillant (# check my bio)');
+        await message.member.ban({ reason: 'Anti-Raid : # check my bio' }).catch(() => {});
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setDescription(`${message.author.tag} a été banni (Anti-Raid : # check my bio).`);
+        return message.channel.send({ embeds: [embed] });
+    }
+
     if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-        // 2. Anti-Spam
+        // 3. Anti-Spam
         const now = Date.now();
         const userData = spamMap.get(message.author.id) || { count: 0, lastMessage: now };
         
@@ -753,6 +783,7 @@ client.on('messageCreate', async (message) => {
         spamMap.set(message.author.id, userData);
 
         if (userData.count > 6) { // 6 messages in 1.5s
+            await sendModDM(message.member, 'Ban (Auto)', 'Anti-Raid : Spam');
             await message.member.ban({ reason: 'Anti-Raid : Spam' }).catch(() => {});
             spamMap.delete(message.author.id);
             const embed = new EmbedBuilder()
@@ -1001,6 +1032,7 @@ client.on('messageCreate', async (message) => {
         const allowed = await checkQuota(message.author.id, 'ban');
         if (!allowed) return message.reply('⚠️ **Alerte Quota** : Limite atteinte.');
 
+        await sendModDM(target, 'Ban Rapide', 'Ban rapide (-bban)');
         await target.ban({ reason: 'Ban rapide (-bban)' });
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
@@ -1062,6 +1094,7 @@ client.on('messageCreate', async (message) => {
         const target = await getMember(args[0]);
         if (!target) return message.reply('Usage: -mmute @user/ID');
 
+        await sendModDM(target, 'Mute 24h', 'Automatique 24h (-mmute)');
         await target.timeout(86400000); // 24h
         const allowed = await checkQuota(message.author.id, 'mute');
         if (!allowed) return message.reply('⚠️ Quota atteint.');
@@ -1109,6 +1142,7 @@ client.on('messageCreate', async (message) => {
         );
 
         // Remove all roles, add soumis, and change nickname
+        await sendModDM(target, 'Soumis', `Vous êtes maintenant le soumis de ${message.author.username}`);
         await target.roles.set([soumisRole.id]);
         await target.setNickname(`Soumis de ${message.author.username}`).catch(() => {});
 
@@ -1130,6 +1164,7 @@ client.on('messageCreate', async (message) => {
         const rolesToRestore = oldData.roles;
         const nicknameToRestore = oldData.nickname;
 
+        await sendModDM(target, 'Libération', "Vous n'êtes plus soumis.");
         await target.roles.set(rolesToRestore);
         if (nicknameToRestore !== undefined) {
             await target.setNickname(nicknameToRestore).catch(() => {});
@@ -1283,6 +1318,122 @@ client.on('messageCreate', async (message) => {
         message.channel.send({ embeds: [embed] });
     }
 
+    // Command: -rollmod
+    if (command === 'rollmod') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+        const target = await getMember(args[0]);
+        if (!target) return message.reply('Veuillez mentionner un utilisateur ou donner son ID.');
+        if (target.roles.highest.position >= message.member.roles.highest.position && message.author.id !== message.guild.ownerId) {
+            return message.reply('Vous ne pouvez pas lancer la roue sur ce membre.');
+        }
+
+        const outcomes = [
+            { name: 'Ban Définitif', weight: 2 },
+            { name: 'Ban Temporaire (1J)', weight: 5 },
+            { name: 'Mute 24H', weight: 8 },
+            { name: 'Mute 12H', weight: 10 },
+            { name: 'Mute 2H', weight: 15 },
+            { name: 'Mute 1H', weight: 20 },
+            { name: 'Rien du tout', weight: 35 },
+            { name: '🎁 Cadeau Gagnant !', weight: 5 }
+        ];
+
+        let totalWeight = outcomes.reduce((acc, obj) => acc + obj.weight, 0);
+        let random = Math.floor(Math.random() * totalWeight);
+        let selected = outcomes[0];
+        for (let i = 0; i < outcomes.length; i++) {
+            if (random < outcomes[i].weight) {
+                selected = outcomes[i];
+                break;
+            }
+            random -= outcomes[i].weight;
+        }
+
+        const startEmbed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle('🎰 Roulette de la Modération')
+            .setDescription(`La roue tourne pour **${target.user.tag}**...`)
+            .setTimestamp();
+        
+        const msg = await message.channel.send({ embeds: [startEmbed] });
+        
+        setTimeout(async () => {
+            let resultDesc = "";
+            const targetTag = target.user.tag;
+            const targetId = target.id;
+            const guild = message.guild;
+
+            try {
+                switch(selected.name) {
+                    case 'Ban Définitif':
+                        await sendModDM(target, 'Ban Définitif', 'Perdu à la Roulette de la Modération');
+                        await target.ban({ reason: 'Roulette de la Modération' });
+                        resultDesc = `💥 **DÉCHÉANCE !** \`${targetTag}\` a été banni définitivement !`;
+                        break;
+                    case 'Ban Temporaire (1J)':
+                        await sendModDM(target, 'Ban 1 Jour', 'Perdu à la Roulette de la Modération. Unban automatique dans 24h.');
+                        await target.ban({ reason: 'Roulette de la Modération (1j)' });
+                        resultDesc = `⏳ **ÉJECTION !** \`${targetTag}\` est banni pour 1 jour.`;
+                        
+                        setTimeout(async () => {
+                            try {
+                                await guild.members.unban(targetId);
+                                const user = await client.users.fetch(targetId).catch(() => null);
+                                if (user) {
+                                    const invites = await guild.invites.fetch();
+                                    let invite = invites.filter(i => i.maxAge === 0).first();
+                                    if (!invite) {
+                                        const channel = guild.channels.cache.find(c => c.isTextBased() && c.permissionsFor(guild.members.me).has(PermissionsBitField.Flags.CreateInstantInvite));
+                                        if (channel) invite = await channel.createInvite({ maxAge: 0 });
+                                    }
+                                    await user.send(`Vous avez été unban de **${guild.name}**. Voici votre invitation : ${invite ? invite.url : 'Lien non disponible'}`).catch(() => {});
+                                }
+                            } catch (e) {
+                                console.log('Erreur lors de l\'unban automatique rollmod:', e);
+                            }
+                        }, 86400000); // 24h unban
+                        break;
+                    case 'Mute 24H':
+                        await sendModDM(target, 'Mute 24H', 'Perdu à la Roulette de la Modération');
+                        await target.timeout(86400000, 'Roulette de la Modération');
+                        resultDesc = `🔇 \`${targetTag}\` est réduit au silence pour 24 heures.`;
+                        break;
+                    case 'Mute 12H':
+                        await sendModDM(target, 'Mute 12H', 'Perdu à la Roulette de la Modération');
+                        await target.timeout(43200000, 'Roulette de la Modération');
+                        resultDesc = `🔇 \`${targetTag}\` est réduit au silence pour 12 heures.`;
+                        break;
+                    case 'Mute 2H':
+                        await sendModDM(target, 'Mute 2H', 'Perdu à la Roulette de la Modération');
+                        await target.timeout(7200000, 'Roulette de la Modération');
+                        resultDesc = `🔇 \`${targetTag}\` est réduit au silence pour 2 heures.`;
+                        break;
+                    case 'Mute 1H':
+                        await sendModDM(target, 'Mute 1H', 'Perdu à la Roulette de la Modération');
+                        await target.timeout(3600000, 'Roulette de la Modération');
+                        resultDesc = `🔇 \`${targetTag}\` est réduit au silence pour 1 heure.`;
+                        break;
+                    case 'Rien du tout':
+                        resultDesc = `🍀 **CHANCEUX !** Il ne se passe absolument rien pour \`${targetTag}\`.`;
+                        break;
+                    case '🎁 Cadeau Gagnant !':
+                        resultDesc = `🎉 **INCROYABLE !** \`${targetTag}\` gagne un cadeau spécial ! (Contact staff)`;
+                        break;
+                }
+            } catch (err) {
+                resultDesc = `⚠️ Erreur lors de l'application du résultat (${selected.name}).`;
+            }
+
+            const resEmbed = new EmbedBuilder()
+                .setColor(0xFFFFFF)
+                .setTitle('🎰 Roulette de la Modération : Résultat')
+                .setDescription(resultDesc)
+                .setTimestamp();
+                
+            await msg.edit({ embeds: [resEmbed] });
+        }, 3000);
+    }
+
     // Command: -help
     if (command === 'help' || command === 'aide') {
         const embed = new EmbedBuilder()
@@ -1292,7 +1443,7 @@ client.on('messageCreate', async (message) => {
             .addFields(
                 { name: '📊 Général', value: '`members`, `boost`, `invites`, `leaderboard`, `lb`, `botinfo`, `uptime`, `icon`, `signaler`' },
                 { name: '🛠️ Administration', value: '`serverinfo`, `userinfo`, `pic`, `banner`, `clear`, `lock`, `unlock`, `slowmode`, `ping`, `setupticket`, `setupvocal`, `setupstaff`, `syncinvites`, `create`, `setupcodes`, `tirage`' },
-                { name: '🛡️ Modération', value: '`kick`, `ban`, `bban`, `tempmute`, `mmute`, `warn`, `verif`, `vmute`, `vunmute`, `vdeaf`, `vundeaf`, `vkick`' }
+                { name: '🛡️ Modération', value: '`kick`, `ban`, `bban`, `tempmute`, `mmute`, `warn`, `verif`, `vmute`, `vunmute`, `vdeaf`, `vundeaf`, `vkick`, `rollmod`' }
             )
             .setFooter({ text: 'Doro Place - Bot de Gestion' })
             .setTimestamp();
@@ -1550,6 +1701,7 @@ client.on('messageCreate', async (message) => {
         if (!target) return message.reply('Usage: -vmute @user/ID');
         if (!target.voice.channel) return message.reply('Cet utilisateur n\'est pas dans un salon vocal.');
         
+        await sendModDM(target, 'Mute Vocal', 'Sanction en salon vocal');
         await target.voice.setMute(true, `Mute vocal par ${message.author.tag}`);
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
@@ -1578,6 +1730,7 @@ client.on('messageCreate', async (message) => {
         if (!target) return message.reply('Usage: -vdeaf @user/ID');
         if (!target.voice.channel) return message.reply('Cet utilisateur n\'est pas dans un salon vocal.');
         
+        await sendModDM(target, 'Assourdissement Vocal', 'Sanction en salon vocal');
         await target.voice.setDeaf(true, `Deafen vocal par ${message.author.tag}`);
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
@@ -1606,6 +1759,7 @@ client.on('messageCreate', async (message) => {
         if (!target) return message.reply('Usage: -vkick @user/ID');
         if (!target.voice.channel) return message.reply('Cet utilisateur n\'est pas dans un salon vocal.');
         
+        await sendModDM(target, 'Expulsion Vocale', 'Sanction en salon vocal');
         await target.voice.disconnect(`Déconnexion vocale par ${message.author.tag}`);
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
@@ -2051,6 +2205,7 @@ client.on('interactionCreate', async (interaction) => {
             if (action === 'muteduration') {
                 const [targetId, reason] = interaction.customId.split('_').slice(1);
                 const duration = parseInt(interaction.values[0]);
+                await sendModDM(target, `Mute (${duration/1000/60}min)`, reason);
                 await target.timeout(duration, reason);
                 logModAction('🔇 Sanction : Timeout', interaction.user, target, `Mute ${duration/1000/60}min`, reason, 0xFFFF00, interaction.channel);
                 return await interaction.update({ content: `${target.user.tag} a été mute pour ${duration/1000/60}min (Raison: ${reason}).`, embeds: [], components: [] });
@@ -2058,6 +2213,7 @@ client.on('interactionCreate', async (interaction) => {
 
             if (action === 'kick') {
                 const reason = interaction.values[0];
+                await sendModDM(target, 'Kick', reason);
                 await target.kick(reason);
                 logModAction('👢 Sanction : Kick', interaction.user, target, 'Kick', reason, 0xFFA500, interaction.channel);
                 return await interaction.update({ content: `${target.user.tag} a été kick (Raison: ${reason}).`, embeds: [], components: [] });
@@ -2065,6 +2221,7 @@ client.on('interactionCreate', async (interaction) => {
 
             if (action === 'ban') {
                 const reason = interaction.values[0];
+                await sendModDM(target, 'Ban', reason);
                 await target.ban({ reason });
                 logModAction('🔨 Sanction : Ban', interaction.user, target, 'Ban', reason, 0xFF0000, interaction.channel);
                 return await interaction.update({ content: `${target.user.tag} a été banni (Raison: ${reason}).`, embeds: [], components: [] });

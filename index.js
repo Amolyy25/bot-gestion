@@ -2111,72 +2111,8 @@ client.on('interactionCreate', async (interaction) => {
             const targetId = parts[1];
             const replyId = parts[2] || 'none';
             
-            if (action === 'gwCondition') {
-                const data = gwData.get(interaction.user.id) || {};
-                data.required_role = interaction.values[0];
-                gwData.set(interaction.user.id, data);
-                const role = interaction.guild.roles.cache.get(data.required_role);
-                return await interaction.reply({ content: `Condition mise à jour : Rôle requis **${role ? role.name : data.required_role}** !`, flags: [MessageFlags.Ephemeral] });
-            }
+            // Handlers moved to their respective interaction type blocks below
 
-            if (action === 'sendToChannel') {
-                const data = embedData.get(interaction.user.id);
-                if (!data) return interaction.reply({ content: 'Aucune donnée d\'embed trouvée.', flags: [MessageFlags.Ephemeral] });
-
-                const channel = interaction.guild.channels.cache.get(interaction.values[0]);
-                if (!channel) return interaction.reply({ content: 'Salon introuvable.', flags: [MessageFlags.Ephemeral] });
-
-                const embed = new EmbedBuilder()
-                    .setColor(data.color || 0xFFFFFF)
-                    .setTitle(data.title || null)
-                    .setDescription(data.description || null)
-                    .setImage(data.image || null)
-                    .setFooter(data.footer ? { text: data.footer } : null);
-
-                await channel.send({ embeds: [embed] });
-                embedData.delete(interaction.user.id);
-                return await interaction.update({ content: `Embed envoyé dans ${channel} !`, embeds: [], components: [] });
-            }
-
-            if (action === 'gwlaunchChannel') {
-                const data = gwData.get(interaction.user.id);
-                if (!data) return interaction.reply({ content: 'Aucune donnée de giveaway trouvée.', flags: [MessageFlags.Ephemeral] });
-
-                const channel = interaction.guild.channels.cache.get(interaction.values[0]);
-                if (!channel) return interaction.reply({ content: 'Salon introuvable.', flags: [MessageFlags.Ephemeral] });
-
-                const match = data.time.match(/^(\d+)([smhd])$/);
-                let durationMs = 0;
-                const value = parseInt(match[1]);
-                const unit = match[2];
-                if (unit === 's') durationMs = value * 1000;
-                if (unit === 'm') durationMs = value * 60000;
-                if (unit === 'h') durationMs = value * 3600000;
-                if (unit === 'd') durationMs = value * 86400000;
-
-                const endTime = Date.now() + durationMs;
-
-                const role = data.required_role ? interaction.guild.roles.cache.get(data.required_role) : null;
-                const embed = new EmbedBuilder()
-                    .setColor(0xFFFFFF)
-                    .setTitle(`🎉 GIVEAWAY: ${data.prize}`)
-                    .setDescription(`${data.description ? data.description + '\n\n' : ''}**Gagnants:** ${data.winners}\n**Se termine:** <t:${Math.floor(endTime / 1000)}:R>\n\n${role ? `⚠️ **Condition:** Avoir le rôle ${role}\n\n` : ''}Appuyez sur le bouton 🎉 en dessous pour participer !`)
-                    .setFooter({ text: `${data.winners} Gagnant(s) | Lancé par ${interaction.user.tag}` });
-
-                const row = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('gw_join').setLabel('🎉 Participer (0)').setStyle(ButtonStyle.Primary)
-                );
-
-                const msg = await channel.send({ embeds: [embed], components: [row] });
-                
-                await db.query(
-                    'INSERT INTO giveaways (message_id, channel_id, guild_id, prize, description, winners_count, end_time, ended, participants, required_role_id) VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9)',
-                    [msg.id, channel.id, interaction.guild.id, data.prize, data.description || '', data.winners, endTime, JSON.stringify([]), data.required_role || null]
-                );
-
-                gwData.delete(interaction.user.id);
-                return await interaction.update({ content: `Giveaway lancé dans ${channel} !`, embeds: [], components: [] });
-            }
 
             // Moderation actions that require a valid member target
             if (['mutereason', 'muteduration', 'kick', 'ban'].includes(action)) {
@@ -2327,7 +2263,23 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
+        if (interaction.isRoleSelectMenu()) {
+            const parts = interaction.customId.split('_');
+            const action = parts[0];
+            
+            if (action === 'gwCondition') {
+                const data = gwData.get(interaction.user.id) || {};
+                data.required_role = interaction.values[0];
+                gwData.set(interaction.user.id, data);
+                const role = interaction.guild.roles.cache.get(data.required_role);
+                return await interaction.reply({ content: `Condition mise à jour : Rôle requis **${role ? role.name : data.required_role}** !`, flags: [MessageFlags.Ephemeral] });
+            }
+        }
+
         if (interaction.isChannelSelectMenu()) {
+            const parts = interaction.customId.split('_');
+            const action = parts[0];
+
             if (interaction.customId === 'ghostping_channel') {
                 const channelId = interaction.values[0];
                 const select = new StringSelectMenuBuilder()
@@ -2341,6 +2293,65 @@ client.on('interactionCreate', async (interaction) => {
                         new StringSelectMenuOptionBuilder().setLabel('10 Secondes').setValue('10000')
                     );
                 return await interaction.update({ content: `Salon sélectionné : <#${channelId}>. Choisissez maintenant le délai de suppression :`, components: [new ActionRowBuilder().addComponents(select)] });
+            }
+
+            if (action === 'sendToChannel') {
+                const data = embedData.get(interaction.user.id);
+                if (!data) return interaction.reply({ content: 'Aucune donnée d\'embed trouvée.', flags: [MessageFlags.Ephemeral] });
+
+                const channel = interaction.guild.channels.cache.get(interaction.values[0]);
+                if (!channel) return interaction.reply({ content: 'Salon introuvable.', flags: [MessageFlags.Ephemeral] });
+
+                const embed = new EmbedBuilder()
+                    .setColor(data.color || 0xFFFFFF)
+                    .setTitle(data.title || null)
+                    .setDescription(data.description || null)
+                    .setImage(data.image || null)
+                    .setFooter(data.footer ? { text: data.footer } : null);
+
+                await channel.send({ embeds: [embed] });
+                embedData.delete(interaction.user.id);
+                return await interaction.update({ content: `Embed envoyé dans ${channel} !`, embeds: [], components: [] });
+            }
+
+            if (action === 'gwlaunchChannel') {
+                const data = gwData.get(interaction.user.id);
+                if (!data) return interaction.reply({ content: 'Aucune donnée de giveaway trouvée.', flags: [MessageFlags.Ephemeral] });
+
+                const channel = interaction.guild.channels.cache.get(interaction.values[0]);
+                if (!channel) return interaction.reply({ content: 'Salon introuvable.', flags: [MessageFlags.Ephemeral] });
+
+                const match = data.time.match(/^(\d+)([smhd])$/);
+                let durationMs = 0;
+                const value = parseInt(match[1]);
+                const unit = match[2];
+                if (unit === 's') durationMs = value * 1000;
+                if (unit === 'm') durationMs = value * 60000;
+                if (unit === 'h') durationMs = value * 3600000;
+                if (unit === 'd') durationMs = value * 86400000;
+
+                const endTime = Date.now() + durationMs;
+
+                const role = data.required_role ? interaction.guild.roles.cache.get(data.required_role) : null;
+                const embed = new EmbedBuilder()
+                    .setColor(0xFFFFFF)
+                    .setTitle(`🎉 GIVEAWAY: ${data.prize}`)
+                    .setDescription(`${data.description ? data.description + '\n\n' : ''}**Gagnants:** ${data.winners}\n**Se termine:** <t:${Math.floor(endTime / 1000)}:R>\n\n${role ? `⚠️ **Condition:** Avoir le rôle ${role}\n\n` : ''}Appuyez sur le bouton 🎉 en dessous pour participer !`)
+                    .setFooter({ text: `${data.winners} Gagnant(s) | Lancé par ${interaction.user.tag}` });
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('gw_join').setLabel('🎉 Participer (0)').setStyle(ButtonStyle.Primary)
+                );
+
+                const msg = await channel.send({ embeds: [embed], components: [row] });
+                
+                await db.query(
+                    'INSERT INTO giveaways (message_id, channel_id, guild_id, prize, description, winners_count, end_time, ended, participants, required_role_id) VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9)',
+                    [msg.id, channel.id, interaction.guild.id, data.prize, data.description || '', data.winners, endTime, JSON.stringify([]), data.required_role || null]
+                );
+
+                gwData.delete(interaction.user.id);
+                return await interaction.update({ content: `Giveaway lancé dans ${channel} !`, embeds: [], components: [] });
             }
         }
 

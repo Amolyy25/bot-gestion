@@ -2178,33 +2178,84 @@ client.on('interactionCreate', async (interaction) => {
                 return await interaction.update({ content: `Giveaway lancé dans ${channel} !`, embeds: [], components: [] });
             }
 
-            const target = await interaction.guild.members.fetch(targetId).catch(() => null);
-            if (!target) return interaction.reply({ content: 'Utilisateur introuvable.', flags: [MessageFlags.Ephemeral] });
+            // Moderation actions that require a valid member target
+            if (['mutereason', 'muteduration', 'kick', 'ban'].includes(action)) {
+                const target = await interaction.guild.members.fetch(targetId).catch(() => null);
+                if (!target) return interaction.reply({ content: 'Utilisateur introuvable.', flags: [MessageFlags.Ephemeral] });
 
-            if (action === 'mutereason') {
-                const reason = interaction.values[0];
-                const embed = new EmbedBuilder()
-                    .setColor(0xFFFFFF)
-                    .setTitle('Modération : Durée du Mute')
-                    .setDescription(`Raison : **${reason}**\nSélectionnez maintenant la durée pour **${target.user.tag}**.`);
+                if (action === 'mutereason') {
+                    const reason = interaction.values[0];
+                    const embed = new EmbedBuilder()
+                        .setColor(0xFFFFFF)
+                        .setTitle('Modération : Durée du Mute')
+                        .setDescription(`Raison : **${reason}**\nSélectionnez maintenant la durée pour **${target.user.tag}**.`);
 
-                const select = new StringSelectMenuBuilder()
-                    .setCustomId(`muteduration_${target.id}_${reason}_${replyId}`)
-                    .setPlaceholder('Choisir une durée...')
-                    .addOptions(
-                        new StringSelectMenuOptionBuilder().setLabel('10 Minutes').setValue('600000'),
-                        new StringSelectMenuOptionBuilder().setLabel('1 Heure').setValue('3600000'),
-                        new StringSelectMenuOptionBuilder().setLabel('12 Heures').setValue('43200000'),
-                        new StringSelectMenuOptionBuilder().setLabel('1 Jour').setValue('86400000'),
-                        new StringSelectMenuOptionBuilder().setLabel('1 Semaine').setValue('604800000')
-                    );
+                    const select = new StringSelectMenuBuilder()
+                        .setCustomId(`muteduration_${target.id}_${reason}_${replyId}`)
+                        .setPlaceholder('Choisir une durée...')
+                        .addOptions(
+                            new StringSelectMenuOptionBuilder().setLabel('10 Minutes').setValue('600000'),
+                            new StringSelectMenuOptionBuilder().setLabel('1 Heure').setValue('3600000'),
+                            new StringSelectMenuOptionBuilder().setLabel('12 Heures').setValue('43200000'),
+                            new StringSelectMenuOptionBuilder().setLabel('1 Jour').setValue('86400000'),
+                            new StringSelectMenuOptionBuilder().setLabel('1 Semaine').setValue('604800000')
+                        );
 
-                const row = new ActionRowBuilder().addComponents(select);
-                return await interaction.update({ embeds: [embed], components: [row] });
+                    const row = new ActionRowBuilder().addComponents(select);
+                    return await interaction.update({ embeds: [embed], components: [row] });
+                }
+
+                if (action === 'muteduration') {
+                    const duration = parseInt(interaction.values[0]);
+                    const baseReason = parts[2];
+                    const rId = parts[3] || 'none';
+                    
+                    let reason = baseReason;
+                    if (rId && rId !== 'none') {
+                        const repliedMsg = await interaction.channel.messages.fetch(rId).catch(() => null);
+                        if (repliedMsg) {
+                            reason += ` | Message répondu: ${repliedMsg.content.substring(0, 100) || 'Image/Embed'}`;
+                        }
+                    }
+
+                    await sendModDM(target, `Mute (${duration/1000/60}min)`, reason);
+                    await target.timeout(duration, reason);
+                    logModAction('🔇 Sanction : Timeout', interaction.user, target, `Mute ${duration/1000/60}min`, reason, 0xFFFF00, interaction.channel);
+                    return await interaction.update({ content: `${target.user.tag} a été mute pour ${duration/1000/60}min (Raison: ${reason}).`, embeds: [], components: [] });
+                }
+
+                if (action === 'kick') {
+                    let reason = interaction.values[0];
+                    if (replyId && replyId !== 'none') {
+                        const repliedMsg = await interaction.channel.messages.fetch(replyId).catch(() => null);
+                        if (repliedMsg) {
+                            reason += ` | Message répondu: ${repliedMsg.content.substring(0, 100) || 'Image/Embed'}`;
+                        }
+                    }
+
+                    await sendModDM(target, 'Kick', reason);
+                    await target.kick(reason);
+                    logModAction('👢 Sanction : Kick', interaction.user, target, 'Kick', reason, 0xFFA500, interaction.channel);
+                    return await interaction.update({ content: `${target.user.tag} a été kick (Raison: ${reason}).`, embeds: [], components: [] });
+                }
+
+                if (action === 'ban') {
+                    let reason = interaction.values[0];
+                    if (replyId && replyId !== 'none') {
+                        const repliedMsg = await interaction.channel.messages.fetch(replyId).catch(() => null);
+                        if (repliedMsg) {
+                            reason += ` | Message répondu: ${repliedMsg.content.substring(0, 100) || 'Image/Embed'}`;
+                        }
+                    }
+
+                    await sendModDM(target, 'Ban', reason);
+                    await target.ban({ reason });
+                    logModAction('🔨 Sanction : Ban', interaction.user, target, 'Ban', reason, 0xFF0000, interaction.channel);
+                    return await interaction.update({ content: `${target.user.tag} a été banni (Raison: ${reason}).`, embeds: [], components: [] });
+                }
             }
 
             if (action === 'report') {
-                const [targetId, msgId] = interaction.customId.split('_').slice(1);
                 const reasonKey = interaction.values[0];
                 const targetUser = await client.users.fetch(targetId).catch(() => null);
                 
@@ -2217,15 +2268,15 @@ client.on('interactionCreate', async (interaction) => {
                 };
 
                 let targetMsg = null;
-                if (msgId !== 'none') {
-                    targetMsg = await interaction.channel.messages.fetch(msgId).catch(() => null);
+                if (replyId !== 'none') {
+                    targetMsg = await interaction.channel.messages.fetch(replyId).catch(() => null);
                 }
 
                 const REPORT_LOG_CHANNEL_ID = '1484856441780306052';
-                const logChannel = interaction.guild.channels.cache.get(REPORT_LOG_CHANNEL_ID) || await interaction.guild.channels.fetch(REPORT_LOG_LOG_CHANNEL_ID).catch(() => null);
+                const logChannel = interaction.guild.channels.cache.get(REPORT_LOG_CHANNEL_ID) || await interaction.guild.channels.fetch(REPORT_LOG_CHANNEL_ID).catch(() => null);
 
                 if (logChannel) {
-                    const embed = new EmbedBuilder()
+                    const reportEmbed = new EmbedBuilder()
                         .setColor(0xFF0000)
                         .setTitle('🚨 NOUVEAU SIGNALEMENT')
                         .setThumbnail(targetUser?.displayAvatarURL({ dynamic: true }))
@@ -2240,21 +2291,19 @@ client.on('interactionCreate', async (interaction) => {
 
                     if (targetMsg) {
                         if (targetMsg.content) {
-                            embed.addFields({ name: '💬 Contenu du message', value: `\`\`\`${targetMsg.content.substring(0, 1000)}\`\`\`` });
+                            reportEmbed.addFields({ name: '💬 Contenu du message', value: `\`\`\`${targetMsg.content.substring(0, 1000)}\`\`\`` });
                         }
                         if (targetMsg.attachments.size > 0) {
                             const firstAttachment = targetMsg.attachments.first();
                             if (firstAttachment.contentType?.startsWith('image/')) {
-                                embed.setImage(firstAttachment.url);
+                                reportEmbed.setImage(firstAttachment.url);
                             }
-                            embed.addFields({ name: '📎 Pièces jointes', value: `${targetMsg.attachments.size} fichier(s) détecté(s)` });
+                            reportEmbed.addFields({ name: '📎 Pièces jointes', value: `${targetMsg.attachments.size} fichier(s) détecté(s)` });
                         }
-                        
-                        // Delete the reported message automatically as requested
                         await targetMsg.delete().catch(() => {});
                     }
 
-                    await logChannel.send({ content: `@here Nouveau signalement reçu ! (Message supprimé automatiquement)`, embeds: [embed] });
+                    await logChannel.send({ content: `@here Nouveau signalement reçu ! (Message supprimé automatiquement)`, embeds: [reportEmbed] });
                 }
 
                 return await interaction.update({ 
@@ -2262,54 +2311,6 @@ client.on('interactionCreate', async (interaction) => {
                     embeds: [], 
                     components: [] 
                 });
-            }
-
-            if (action === 'muteduration') {
-                const [targetId, baseReason, rId] = interaction.customId.split('_').slice(1);
-                const duration = parseInt(interaction.values[0]);
-                
-                let reason = baseReason;
-                if (rId && rId !== 'none') {
-                    const repliedMsg = await interaction.channel.messages.fetch(rId).catch(() => null);
-                    if (repliedMsg) {
-                        reason += ` | Message répondu: ${repliedMsg.content.substring(0, 100) || 'Image/Embed'}`;
-                    }
-                }
-
-                await sendModDM(target, `Mute (${duration/1000/60}min)`, reason);
-                await target.timeout(duration, reason);
-                logModAction('🔇 Sanction : Timeout', interaction.user, target, `Mute ${duration/1000/60}min`, reason, 0xFFFF00, interaction.channel);
-                return await interaction.update({ content: `${target.user.tag} a été mute pour ${duration/1000/60}min (Raison: ${reason}).`, embeds: [], components: [] });
-            }
-
-            if (action === 'kick') {
-                let reason = interaction.values[0];
-                if (replyId && replyId !== 'none') {
-                    const repliedMsg = await interaction.channel.messages.fetch(replyId).catch(() => null);
-                    if (repliedMsg) {
-                        reason += ` | Message répondu: ${repliedMsg.content.substring(0, 100) || 'Image/Embed'}`;
-                    }
-                }
-
-                await sendModDM(target, 'Kick', reason);
-                await target.kick(reason);
-                logModAction('👢 Sanction : Kick', interaction.user, target, 'Kick', reason, 0xFFA500, interaction.channel);
-                return await interaction.update({ content: `${target.user.tag} a été kick (Raison: ${reason}).`, embeds: [], components: [] });
-            }
-
-            if (action === 'ban') {
-                let reason = interaction.values[0];
-                if (replyId && replyId !== 'none') {
-                    const repliedMsg = await interaction.channel.messages.fetch(replyId).catch(() => null);
-                    if (repliedMsg) {
-                        reason += ` | Message répondu: ${repliedMsg.content.substring(0, 100) || 'Image/Embed'}`;
-                    }
-                }
-
-                await sendModDM(target, 'Ban', reason);
-                await target.ban({ reason });
-                logModAction('🔨 Sanction : Ban', interaction.user, target, 'Ban', reason, 0xFF0000, interaction.channel);
-                return await interaction.update({ content: `${target.user.tag} a été banni (Raison: ${reason}).`, embeds: [], components: [] });
             }
 
             if (action === 'ghostping') {

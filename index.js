@@ -9,6 +9,7 @@ const {
     ButtonStyle, 
     PermissionsBitField,
     Collection,
+    StringSelectMenuBuilder,
     StringSelectMenuOptionBuilder,
     ChannelSelectMenuBuilder,
     RoleSelectMenuBuilder,
@@ -935,8 +936,14 @@ client.on('messageCreate', async (message) => {
         }
     }
     const getMember = async (query) => {
-        if (!query) return null;
-        const id = query.replace(/[<@!>]/g, '');
+        let id = query ? query.replace(/[<@!>]/g, '') : null;
+        
+        if (!id && message.reference) {
+            const repliedMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
+            if (repliedMsg) return repliedMsg.member;
+        }
+        
+        if (!id) return null;
         try {
             return await message.guild.members.fetch(id);
         } catch {
@@ -946,8 +953,14 @@ client.on('messageCreate', async (message) => {
 
     // Helper to get user from mention or ID
     const getUser = async (query) => {
-        if (!query) return null;
-        const id = query.replace(/[<@!>]/g, '');
+        let id = query ? query.replace(/[<@!>]/g, '') : null;
+
+        if (!id && message.reference) {
+            const repliedMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
+            if (repliedMsg) return repliedMsg.author;
+        }
+
+        if (!id) return null;
         try {
             return await client.users.fetch(id);
         } catch {
@@ -959,20 +972,21 @@ client.on('messageCreate', async (message) => {
     if (command === 'kick') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.KickMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
         const target = await getMember(args[0]);
-        if (!target) return message.reply('Veuillez mentionner un utilisateur ou donner son ID.');
+        if (!target) return message.reply('Veuillez mentionner un utilisateur, donner son ID ou répondre à son message.');
         if (target.roles.highest.position >= message.member.roles.highest.position) return message.reply('Vous ne pouvez pas kick un membre ayant un rôle supérieur ou égal au vôtre.');
         if (!target.kickable) return message.reply('Je ne peux pas kick cet utilisateur.');
 
         const allowed = await checkQuota(message.author.id, 'kick');
         if (!allowed) return message.reply('⚠️ **Alerte Quota** : Vous avez dépassé votre limite d\'actions modération pour cette heure. Contactez un administrateur.');
 
+        const replyId = message.reference ? message.reference.messageId : 'none';
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
             .setTitle('Modération : Kick')
             .setDescription(`Veuillez sélectionner une raison pour kick **${target.user.tag}**.`);
 
         const select = new StringSelectMenuBuilder()
-            .setCustomId(`kick_${target.id}`)
+            .setCustomId(`kick_${target.id}_${replyId}`)
             .setPlaceholder('Choisir une raison...')
             .addOptions(
                 new StringSelectMenuOptionBuilder().setLabel('Règlement non respecté').setValue('reglement'),
@@ -992,20 +1006,21 @@ client.on('messageCreate', async (message) => {
     if (command === 'ban') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.BanMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
         const target = await getMember(args[0]);
-        if (!target) return message.reply('Veuillez mentionner un utilisateur ou donner son ID.');
+        if (!target) return message.reply('Veuillez mentionner un utilisateur, donner son ID ou répondre à son message.');
         if (target.roles.highest.position >= message.member.roles.highest.position) return message.reply('Vous ne pouvez pas bannir un membre ayant un rôle supérieur ou égal au vôtre.');
         if (!target.bannable) return message.reply('Je ne peux pas ban cet utilisateur.');
 
         const allowed = await checkQuota(message.author.id, 'ban');
         if (!allowed) return message.reply('⚠️ **Alerte Quota** : Vous avez dépassé votre limite de bannissements pour cette heure.');
 
+        const replyId = message.reference ? message.reference.messageId : 'none';
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
             .setTitle('Modération : Ban')
             .setDescription(`Veuillez sélectionner une raison pour bannir **${target.user.tag}**.`);
 
         const select = new StringSelectMenuBuilder()
-            .setCustomId(`ban_${target.id}`)
+            .setCustomId(`ban_${target.id}_${replyId}`)
             .setPlaceholder('Choisir une raison...')
             .addOptions(
                 new StringSelectMenuOptionBuilder().setLabel('Règlement non respecté').setValue('reglement'),
@@ -1025,20 +1040,28 @@ client.on('messageCreate', async (message) => {
     if (command === 'bban') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const target = await getMember(args[0]);
-        if (!target) return message.reply('Veuillez mentionner un utilisateur ou donner son ID.');
+        if (!target) return message.reply('Veuillez mentionner un utilisateur, donner son ID ou répondre à son message.');
         if (target.roles.highest.position >= message.member.roles.highest.position) return message.reply('Vous ne pouvez pas bannir ce membre.');
         if (!target.bannable) return message.reply('Je ne peux pas ban cet utilisateur.');
 
         const allowed = await checkQuota(message.author.id, 'ban');
         if (!allowed) return message.reply('⚠️ **Alerte Quota** : Limite atteinte.');
 
-        await sendModDM(target, 'Ban Rapide', 'Ban rapide (-bban)');
-        await target.ban({ reason: 'Ban rapide (-bban)' });
+        let reason = 'Ban rapide (-bban)';
+        if (message.reference) {
+            const repliedMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
+            if (repliedMsg) {
+                reason += ` | Message répondu: ${repliedMsg.content.substring(0, 100) || 'Image/Embed'}`;
+            }
+        }
+
+        await sendModDM(target, 'Ban Rapide', reason);
+        await target.ban({ reason });
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
             .setDescription(`${target.user.tag} a été banni rapidement.`);
         message.channel.send({ embeds: [embed] });
-        logModAction('🔨 Sanction : Ban Rapide', message.author, target, 'Ban Rapide', 'Aucune raison spécifiée (-bban)', 0xFF0000, message.channel);
+        logModAction('🔨 Sanction : Ban Rapide', message.author, target, 'Ban Rapide', reason, 0xFF0000, message.channel);
     }
 
     // Command: -clear
@@ -1062,18 +1085,19 @@ client.on('messageCreate', async (message) => {
     if (command === 'tempmute') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
         const target = await getMember(args[0]);
-        if (!target) return message.reply('Usage: -tempmute @user/ID');
+        if (!target) return message.reply('Usage: -tempmute @user/ID (ou répondez à un message)');
 
         const allowed = await checkQuota(message.author.id, 'mute');
         if (!allowed) return message.reply('⚠️ **Alerte Quota** : Trop d\'actions (mute) récemment.');
 
+        const replyId = message.reference ? message.reference.messageId : 'none';
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
             .setTitle('Modération : Tempmute')
             .setDescription(`Veuillez sélectionner une raison pour mute **${target.user.tag}**.`);
 
         const select = new StringSelectMenuBuilder()
-            .setCustomId(`mutereason_${target.id}`)
+            .setCustomId(`mutereason_${target.id}_${replyId}`)
             .setPlaceholder('Choisir une raison...')
             .addOptions(
                 new StringSelectMenuOptionBuilder().setLabel('Règlement non respecté').setValue('reglement'),
@@ -1092,10 +1116,18 @@ client.on('messageCreate', async (message) => {
     if (command === 'mmute') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const target = await getMember(args[0]);
-        if (!target) return message.reply('Usage: -mmute @user/ID');
+        if (!target) return message.reply('Usage: -mmute @user/ID (ou répondez à un message)');
 
-        await sendModDM(target, 'Mute 24h', 'Automatique 24h (-mmute)');
-        await target.timeout(86400000); // 24h
+        let reason = 'Automatique 24h (-mmute)';
+        if (message.reference) {
+            const repliedMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
+            if (repliedMsg) {
+                reason += ` | Message répondu: ${repliedMsg.content.substring(0, 100) || 'Image/Embed'}`;
+            }
+        }
+
+        await sendModDM(target, 'Mute 24h', reason);
+        await target.timeout(86400000, reason); // 24h
         const allowed = await checkQuota(message.author.id, 'mute');
         if (!allowed) return message.reply('⚠️ Quota atteint.');
 
@@ -1103,7 +1135,7 @@ client.on('messageCreate', async (message) => {
             .setColor(0xFFFFFF)
             .setDescription(`${target.user.tag} a été mute pour 24 heures.`);
         message.channel.send({ embeds: [embed] });
-        logModAction('🔇 Sanction : Mute 24h', message.author, target, 'Mute 24h', 'Automatique 24h (-mmute)', 0xFFFF00, message.channel);
+        logModAction('🔇 Sanction : Mute 24h', message.author, target, 'Mute 24h', reason, 0xFFFF00, message.channel);
     }
 
     // Command: -unmute
@@ -1786,8 +1818,17 @@ client.on('messageCreate', async (message) => {
     if (command === 'warn') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
         const target = await getMember(args[0]);
-        const reason = args.slice(1).join(' ');
-        if (!target || !reason) return message.reply('Usage: -warn @user/ID <raison> (La raison est obligatoire)');
+        let reason = args.slice(1).join(' ');
+        
+        if (message.reference) {
+            const repliedMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
+            if (repliedMsg) {
+                const replyContext = ` | Message répondu: ${repliedMsg.content.substring(0, 100) || 'Image/Embed'}`;
+                reason = reason ? `${reason}${replyContext}` : `Sanction via réponse${replyContext}`;
+            }
+        }
+
+        if (!target || !reason) return message.reply('Usage: -warn @user/ID <raison> (La raison est obligatoire, ou répondez à un message)');
 
         const allowed = await checkQuota(message.author.id, 'warn', 10); // Higher quota for warns
         if (!allowed) return message.reply('⚠️ Quota warn atteint.');
@@ -2062,7 +2103,10 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         if (interaction.isStringSelectMenu()) {
-            const [action, targetId] = interaction.customId.split('_');
+            const parts = interaction.customId.split('_');
+            const action = parts[0];
+            const targetId = parts[1];
+            const replyId = parts[2] || 'none';
             
             if (action === 'gwCondition') {
                 const data = gwData.get(interaction.user.id) || {};
@@ -2142,7 +2186,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setDescription(`Raison : **${reason}**\nSélectionnez maintenant la durée pour **${target.user.tag}**.`);
 
                 const select = new StringSelectMenuBuilder()
-                    .setCustomId(`muteduration_${target.id}_${reason}`)
+                    .setCustomId(`muteduration_${target.id}_${reason}_${replyId}`)
                     .setPlaceholder('Choisir une durée...')
                     .addOptions(
                         new StringSelectMenuOptionBuilder().setLabel('10 Minutes').setValue('600000'),
@@ -2218,8 +2262,17 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             if (action === 'muteduration') {
-                const [targetId, reason] = interaction.customId.split('_').slice(1);
+                const [targetId, baseReason, rId] = interaction.customId.split('_').slice(1);
                 const duration = parseInt(interaction.values[0]);
+                
+                let reason = baseReason;
+                if (rId && rId !== 'none') {
+                    const repliedMsg = await interaction.channel.messages.fetch(rId).catch(() => null);
+                    if (repliedMsg) {
+                        reason += ` | Message répondu: ${repliedMsg.content.substring(0, 100) || 'Image/Embed'}`;
+                    }
+                }
+
                 await sendModDM(target, `Mute (${duration/1000/60}min)`, reason);
                 await target.timeout(duration, reason);
                 logModAction('🔇 Sanction : Timeout', interaction.user, target, `Mute ${duration/1000/60}min`, reason, 0xFFFF00, interaction.channel);
@@ -2227,7 +2280,14 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             if (action === 'kick') {
-                const reason = interaction.values[0];
+                let reason = interaction.values[0];
+                if (replyId && replyId !== 'none') {
+                    const repliedMsg = await interaction.channel.messages.fetch(replyId).catch(() => null);
+                    if (repliedMsg) {
+                        reason += ` | Message répondu: ${repliedMsg.content.substring(0, 100) || 'Image/Embed'}`;
+                    }
+                }
+
                 await sendModDM(target, 'Kick', reason);
                 await target.kick(reason);
                 logModAction('👢 Sanction : Kick', interaction.user, target, 'Kick', reason, 0xFFA500, interaction.channel);
@@ -2235,7 +2295,14 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             if (action === 'ban') {
-                const reason = interaction.values[0];
+                let reason = interaction.values[0];
+                if (replyId && replyId !== 'none') {
+                    const repliedMsg = await interaction.channel.messages.fetch(replyId).catch(() => null);
+                    if (repliedMsg) {
+                        reason += ` | Message répondu: ${repliedMsg.content.substring(0, 100) || 'Image/Embed'}`;
+                    }
+                }
+
                 await sendModDM(target, 'Ban', reason);
                 await target.ban({ reason });
                 logModAction('🔨 Sanction : Ban', interaction.user, target, 'Ban', reason, 0xFF0000, interaction.channel);

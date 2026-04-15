@@ -632,14 +632,16 @@ process.on('uncaughtException', error => logError(error, 'Uncaught Exception'));
 
 client.on('guildMemberAdd', async (member) => {
     try {
-        // --- JOIN PING LOGIC ---
-        const pingChannelId = '1483532401404543077';
-        const pingChannel = member.guild.channels.cache.get(pingChannelId) || await member.guild.channels.fetch(pingChannelId).catch(() => null);
-        if (pingChannel) {
-            const msg = await pingChannel.send(`<@${member.id}>`).catch(() => null);
-            if (msg) setTimeout(() => msg.delete().catch(() => {}), 3000);
+        // --- DYNAMIC GHOST PING LOGIC ---
+        const ghostPings = await db.query('SELECT channel_id, delay_ms FROM ghost_pings WHERE active = TRUE');
+        for (const row of ghostPings.rows) {
+            const pingChannel = member.guild.channels.cache.get(row.channel_id) || await member.guild.channels.fetch(row.channel_id).catch(() => null);
+            if (pingChannel) {
+                const msg = await pingChannel.send(`<@${member.id}>`).catch(() => null);
+                if (msg) setTimeout(() => msg.delete().catch(() => {}), row.delay_ms);
+            }
         }
-        // ------------------------
+        // --------------------------------
 
         // Invite tracking logic
         const cachedInvites = guildInvites.get(member.guild.id);
@@ -800,26 +802,6 @@ client.on('messageCreate', async (message) => {
     const args = message.content.slice(PREFIX.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
 
-    // Command: -setupticket
-    if (command === 'setupticket') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
-
-        const embed = new EmbedBuilder()
-            .setColor(0xFFFFFF)
-            .setTitle('Achat Pass VIP')
-            .setDescription('Cliquez sur le bouton ci-dessous pour ouvrir un ticket et acheter le pass VIP du serveur.')
-            .setFooter({ text: 'Système de Ticket' });
-
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('open_ticket')
-                .setLabel('Ouvrir un ticket')
-                .setStyle(ButtonStyle.Secondary)
-        );
-
-        await message.channel.send({ embeds: [embed], components: [row] });
-        await message.delete();
-    }
 
     // Helper to check staff quotas (Anti-Nuke)
     const checkQuota = async (staffId, actionType, limit = 5, windowMs = 3600000) => {
@@ -937,35 +919,43 @@ client.on('messageCreate', async (message) => {
     }
     const getMember = async (query) => {
         let id = query ? query.replace(/[<@!>]/g, '') : null;
-        
+        if (id) {
+            try {
+                const member = await message.guild.members.fetch(id);
+                if (member) return member;
+            } catch {
+                // Si l'ID est invalide, on ne s'arrête pas, on tente la réponse si pas d'autre ID fourni
+            }
+        }
         if (!id && message.reference) {
-            const repliedMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
-            if (repliedMsg) return repliedMsg.member;
+            try {
+                const repliedMsg = await message.channel.messages.fetch(message.reference.messageId);
+                return await message.guild.members.fetch(repliedMsg.author.id);
+            } catch {
+                return null;
+            }
         }
-        
-        if (!id) return null;
-        try {
-            return await message.guild.members.fetch(id);
-        } catch {
-            return null;
-        }
+        return null;
     };
 
-    // Helper to get user from mention or ID
     const getUser = async (query) => {
         let id = query ? query.replace(/[<@!>]/g, '') : null;
-
+        if (id) {
+            try {
+                return await client.users.fetch(id);
+            } catch {
+                // On peut tenter la réponse si l'ID échoue
+            }
+        }
         if (!id && message.reference) {
-            const repliedMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
-            if (repliedMsg) return repliedMsg.author;
+            try {
+                const repliedMsg = await message.channel.messages.fetch(message.reference.messageId);
+                return repliedMsg.author;
+            } catch {
+                return null;
+            }
         }
-
-        if (!id) return null;
-        try {
-            return await client.users.fetch(id);
-        } catch {
-            return null;
-        }
+        return null;
     };
 
     // Command: -kick
@@ -1082,7 +1072,7 @@ client.on('messageCreate', async (message) => {
     }
 
     // Command: -tempmute
-    if (command === 'tempmute') {
+    if (command === 'tempmute' || command === 'mute') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
         const target = await getMember(args[0]);
         if (!target) return message.reply('Usage: -tempmute @user/ID (ou répondez à un message)');
@@ -1741,6 +1731,35 @@ client.on('messageCreate', async (message) => {
         }, 9000);
     }
 
+    // Command: -ghostping
+    if (command === 'ghostping') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
+        const res = await db.query('SELECT channel_id, delay_ms FROM ghost_pings');
+        
+        let desc = "Configurez les ghost pings qui s'exécutent lorsqu'un membre rejoint le serveur.\n\n";
+        if (res.rows.length === 0) {
+            desc += "*Aucun ghost ping configuré.*";
+        } else {
+            desc += "**Channels actifs :**\n";
+            res.rows.forEach((row, i) => {
+                desc += `${i+1}. <#${row.channel_id}> (\`${row.delay_ms/1000}s\`)\n`;
+            });
+        }
+
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle('👻 Configuration Ghost Ping')
+            .setDescription(desc);
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('gp_add').setLabel('Ajouter / Editer').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('gp_remove').setLabel('Supprimer').setStyle(ButtonStyle.Danger)
+        );
+
+        await message.channel.send({ embeds: [embed], components: [row] });
+    }
+
     // Command: -vmute (Vocal Mute)
     if (command === 'vmute') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
@@ -1851,10 +1870,6 @@ client.on('messageCreate', async (message) => {
         if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
         
         let targetUser = await getUser(args[0]);
-        if (!targetUser && message.reference) {
-            const repliedMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
-            if (repliedMsg) targetUser = repliedMsg.author;
-        }
 
         if (!targetUser) return message.reply('Veuillez mentionner un utilisateur, donner son ID ou répondre à son message.');
 
@@ -1950,18 +1965,6 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    // Command: -help
-    if (command === 'help') {
-        const embed = new EmbedBuilder()
-            .setColor(0xFFFFFF)
-            .setTitle('Liste des commandes')
-            .addFields(
-                { name: 'Administrationnnnnn', value: '`-setupticket`, `-setupcodes`, `-kick`, `-ban`, `-bban`, `-clear`, `-tempmute`, `-mmute`, `-lock`, `-unlock`, `-slowmode`' },
-                { name: 'Système Soumis', value: '`-soumis @user`, `-unsoumis @user`' },
-                { name: 'Utilitaire', value: '`-pic`, `-banner`, `-userinfo`, `-serverinfo`, `-ping`, `-invites @user`, `-tirage`' }
-            );
-        message.channel.send({ embeds: [embed] });
-    }
     } catch (error) {
         logError(error, 'Event: messageCreate');
     }
@@ -2308,10 +2311,64 @@ client.on('interactionCreate', async (interaction) => {
                 logModAction('🔨 Sanction : Ban', interaction.user, target, 'Ban', reason, 0xFF0000, interaction.channel);
                 return await interaction.update({ content: `${target.user.tag} a été banni (Raison: ${reason}).`, embeds: [], components: [] });
             }
+
+            if (action === 'ghostping') {
+                const delay = parseInt(interaction.values[0]);
+                const channelId = parts[1];
+                await db.query('INSERT INTO ghost_pings (channel_id, delay_ms, active) VALUES ($1, $2, TRUE) ON CONFLICT (channel_id) DO UPDATE SET delay_ms = $2, active = TRUE', [channelId, delay]);
+                return await interaction.update({ content: `✅ Ghost ping configuré dans <#${channelId}> avec un délai de \`${delay/1000}s\`.`, embeds: [], components: [] });
+            }
+
+            if (action === 'ghostpingremove') {
+                const channelId = interaction.values[0];
+                await db.query('DELETE FROM ghost_pings WHERE channel_id = $1', [channelId]);
+                return await interaction.update({ content: `✅ Ghost ping supprimé pour <#${channelId}>.`, embeds: [], components: [] });
+            }
+        }
+
+        if (interaction.isChannelSelectMenu()) {
+            if (interaction.customId === 'ghostping_channel') {
+                const channelId = interaction.values[0];
+                const select = new StringSelectMenuBuilder()
+                    .setCustomId(`ghostping_${channelId}`)
+                    .setPlaceholder('Choisir le délai de suppression...')
+                    .addOptions(
+                        new StringSelectMenuOptionBuilder().setLabel('Immédiat (0s)').setValue('0'),
+                        new StringSelectMenuOptionBuilder().setLabel('1 Seconde').setValue('1000'),
+                        new StringSelectMenuOptionBuilder().setLabel('3 Secondes').setValue('3000'),
+                        new StringSelectMenuOptionBuilder().setLabel('5 Secondes').setValue('5000'),
+                        new StringSelectMenuOptionBuilder().setLabel('10 Secondes').setValue('10000')
+                    );
+                return await interaction.update({ content: `Salon sélectionné : <#${channelId}>. Choisissez maintenant le délai de suppression :`, components: [new ActionRowBuilder().addComponents(select)] });
+            }
         }
 
         if (interaction.isButton()) {
             const userId = interaction.user.id;
+
+            if (interaction.customId === 'gp_add') {
+                const select = new ChannelSelectMenuBuilder()
+                    .setCustomId('ghostping_channel')
+                    .setPlaceholder('Choisir le salon pour le ghost ping...')
+                    .addChannelTypes(ChannelType.GuildText);
+                return await interaction.reply({ content: 'Sélectionnez le salon :', components: [new ActionRowBuilder().addComponents(select)], flags: [MessageFlags.Ephemeral] });
+            }
+
+            if (interaction.customId === 'gp_remove') {
+                const res = await db.query('SELECT channel_id FROM ghost_pings');
+                if (res.rows.length === 0) return interaction.reply({ content: 'Aucun ghost ping configuré.', flags: [MessageFlags.Ephemeral] });
+
+                const select = new StringSelectMenuBuilder()
+                    .setCustomId('ghostpingremove_none')
+                    .setPlaceholder('Choisir le salon à supprimer...');
+                
+                res.rows.forEach(row => {
+                    const ch = interaction.guild.channels.cache.get(row.channel_id);
+                    select.addOptions(new StringSelectMenuOptionBuilder().setLabel(ch ? `#${ch.name}` : `ID: ${row.channel_id}`).setValue(row.channel_id));
+                });
+
+                return await interaction.reply({ content: 'Sélectionnez le ghost ping à supprimer :', components: [new ActionRowBuilder().addComponents(select)], flags: [MessageFlags.Ephemeral] });
+            }
 
             if (interaction.customId === 'use_vip_code') {
                 const modal = new ModalBuilder()

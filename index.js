@@ -1591,7 +1591,7 @@ client.on('messageCreate', async (message) => {
             .setDescription(`Voici les commandes disponibles sur le serveur. Le préfixe est \`${PREFIX}\``)
             .addFields(
                 { name: '📊 Général', value: '`members`, `boost`, `invites`, `leaderboard`, `lb`, `botinfo`, `uptime`, `icon`, `signaler`' },
-                { name: '🛠️ Administration (Admin Only)', value: '`serverinfo`, `userinfo`, `pic`, `banner`, `clear`, `lock`, `unlock`, `slowmode`, `ping`, `setupticket`, `setupvocal`, `setupstaff`, `syncinvites`, `create`, `setupcodes`, `tirage`' },
+                { name: '🛠️ Administration (Admin Only)', value: '`serverinfo`, `userinfo`, `pic`, `banner`, `clear`, `lock`, `unlock`, `slowmode`, `ping`, `setupticket`, `setupvocal`, `setupstaff`, `syncinvites`, `create`, `setupcodes`, `tirage`, `dmall`' },
                 { name: '🛡️ Modération (Staff)', value: '`kick`, `ban`, `bban`, `tempmute`, `mmute`, `unmute`, `warn`, `verif`, `vmute`, `vunmute`, `vdeaf`, `vundeaf`, `vkick`, `rollmod`' },
                 { name: '💋 Humiliation (Admin Only)', value: '`pute`, `toutou`, `clown`, `esclave`, `unpute`' }
             )
@@ -1766,6 +1766,29 @@ client.on('messageCreate', async (message) => {
             new ButtonBuilder().setCustomId('set_footer').setLabel('Footer').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('preview_embed').setLabel('Aperçu').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('send_embed').setLabel('Envoyer').setStyle(ButtonStyle.Success)
+        );
+
+        await message.channel.send({ embeds: [embed], components: [row1, row2] });
+    }
+
+    // Command: -dmall
+    if (command === 'dmall') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle('Créateur DM All')
+            .setDescription('Utilisez les boutons ci-dessous pour configurer votre message à envoyer à TOUS les membres du serveur. Vous pouvez ajouter du texte et un média (photo/vidéo via URL).');
+
+        const row1 = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('set_dm_content').setLabel('Texte').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('set_dm_media').setLabel('Image / Vidéo (URL)').setStyle(ButtonStyle.Secondary)
+        );
+
+        const row2 = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('preview_dm').setLabel('Aperçu').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('test_dm_select').setLabel('Test (Un Membre)').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('send_dmall').setLabel('Envoyer à Tous').setStyle(ButtonStyle.Danger)
         );
 
         await message.channel.send({ embeds: [embed], components: [row1, row2] });
@@ -2129,6 +2152,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 // Store temporary embed data
 const embedData = new Collection();
 const gwData = new Collection();
+const dmData = new Collection();
 
 // Interaction Handling (Buttons & Select Menus & Modals)
 client.on('interactionCreate', async (interaction) => {
@@ -2215,6 +2239,18 @@ client.on('interactionCreate', async (interaction) => {
 
                 gwData.set(userId, data);
                 return await interaction.reply({ content: 'Paramètre du giveaway mis à jour !', flags: [MessageFlags.Ephemeral] });
+            }
+
+            const dmModalTypes = ['modalDmContent', 'modalDmMedia'];
+            if (dmModalTypes.includes(type)) {
+                let data = dmData.get(userId) || {};
+                const value = interaction.fields.getTextInputValue('input');
+
+                if (type === 'modalDmContent') data.content = value;
+                if (type === 'modalDmMedia') data.media = value;
+
+                dmData.set(userId, data);
+                return await interaction.reply({ content: 'Paramètre du DM mis à jour !', flags: [MessageFlags.Ephemeral] });
             }
         }
 
@@ -2468,6 +2504,32 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
+        if (interaction.isUserSelectMenu()) {
+            const parts = interaction.customId.split('_');
+            const action = parts[0];
+
+            if (action === 'testToMember') {
+                const userId = parts[1];
+                const data = dmData.get(userId);
+                if (!data) return interaction.reply({ content: 'Aucune donnée de DM trouvée.', flags: [MessageFlags.Ephemeral] });
+
+                const targetUserId = interaction.values[0];
+                const targetUser = await client.users.fetch(targetUserId).catch(() => null);
+                
+                if (!targetUser) return interaction.reply({ content: 'Utilisateur introuvable.', flags: [MessageFlags.Ephemeral] });
+
+                const payload = {};
+                payload.content = [data.content, data.media].filter(Boolean).join('\n\n');
+
+                try {
+                    await targetUser.send(payload);
+                    return await interaction.update({ content: `✅ DM de test envoyé avec succès à ${targetUser.tag}.`, components: [] });
+                } catch (e) {
+                    return await interaction.update({ content: `❌ Impossible d'envoyer le DM de test à ${targetUser.tag} (DMs fermés ?).`, components: [] });
+                }
+            }
+        }
+
         if (interaction.isButton()) {
             const userId = interaction.user.id;
 
@@ -2561,6 +2623,89 @@ client.on('interactionCreate', async (interaction) => {
                     .addChannelTypes(ChannelType.GuildText);
 
                 return await interaction.reply({ content: 'Sélectionnez le salon d\'envoi :', components: [new ActionRowBuilder().addComponents(select)], flags: [MessageFlags.Ephemeral] });
+            }
+
+            if (['set_dm_content', 'set_dm_media'].includes(interaction.customId)) {
+                const typeMap = {
+                    set_dm_content: ['Texte du DM', 'modalDmContent', TextInputStyle.Paragraph],
+                    set_dm_media: ['URL Image/Vidéo', 'modalDmMedia', TextInputStyle.Short]
+                };
+
+                const [label, modalType, style] = typeMap[interaction.customId];
+                const modal = new ModalBuilder()
+                    .setCustomId(`${modalType}_${userId}`)
+                    .setTitle(`Configurer : ${label}`);
+
+                const input = new TextInputBuilder()
+                    .setCustomId('input')
+                    .setLabel(label)
+                    .setStyle(style)
+                    .setRequired(true);
+
+                modal.addComponents(new ActionRowBuilder().addComponents(input));
+                return await interaction.showModal(modal);
+            }
+
+            if (interaction.customId === 'preview_dm') {
+                const data = dmData.get(userId);
+                if (!data || (!data.content && !data.media)) return interaction.reply({ content: 'Le DM est vide. Configurez un texte ou un média.', flags: [MessageFlags.Ephemeral] });
+
+                const payload = {};
+                payload.content = [data.content, data.media].filter(Boolean).join('\n\n');
+
+                return await interaction.reply({ content: `**Aperçu de votre DM :**\n\n${payload.content}`, flags: [MessageFlags.Ephemeral] });
+            }
+
+            if (interaction.customId === 'test_dm_select') {
+                const data = dmData.get(userId);
+                if (!data || (!data.content && !data.media)) {
+                    return interaction.reply({ content: 'Le DM doit avoir au moins un texte ou un média pour le tester.', flags: [MessageFlags.Ephemeral] });
+                }
+
+                const select = new UserSelectMenuBuilder()
+                    .setCustomId(`testToMember_${userId}`)
+                    .setPlaceholder('Choisir le membre pour le test...');
+
+                return await interaction.reply({ content: 'Sélectionnez le membre à qui envoyer le test :', components: [new ActionRowBuilder().addComponents(select)], flags: [MessageFlags.Ephemeral] });
+            }
+
+            if (interaction.customId === 'send_dmall') {
+                const data = dmData.get(userId);
+                if (!data || (!data.content && !data.media)) {
+                    return interaction.reply({ content: 'Le DM doit avoir au moins un texte ou un média.', flags: [MessageFlags.Ephemeral] });
+                }
+
+                await interaction.reply({ content: '🚀 Envoi du DM à tous les membres commencé... Cela peut prendre plusieurs minutes.', flags: [MessageFlags.Ephemeral] });
+                
+                const members = await interaction.guild.members.fetch();
+                let success = 0;
+                let failed = 0;
+
+                const payload = {};
+                payload.content = [data.content, data.media].filter(Boolean).join('\n\n');
+
+                const msg = await interaction.channel.send(`Progression de l'envoi : 0/${members.size} membres...`);
+
+                let i = 0;
+                for (const member of members.values()) {
+                    if (member.user.bot) continue;
+                    try {
+                        await member.send(payload);
+                        success++;
+                    } catch (e) {
+                        failed++;
+                    }
+                    i++;
+                    if (i % 20 === 0) {
+                        await msg.edit(`Progression de l'envoi : ${i}/${members.size} membres... (${success} réussis, ${failed} échoués)`).catch(() => {});
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    } else {
+                        await new Promise(resolve => setTimeout(resolve, 100)); // anti rate-limit
+                    }
+                }
+
+                await msg.edit(`✅ Envoi terminé !\nRéussis : ${success}\nÉchoués (DMs fermés) : ${failed}`).catch(() => {});
+                dmData.delete(userId);
             }
 
             if (['set_gw_prize', 'set_gw_desc', 'set_gw_duration', 'set_gw_winners'].includes(interaction.customId)) {

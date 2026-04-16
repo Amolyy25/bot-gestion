@@ -645,6 +645,7 @@ client.on('guildMemberAdd', async (member) => {
         // --------------------------------
 
         // Invite tracking logic
+        await new Promise(resolve => setTimeout(resolve, 1200));
         const cachedInvites = guildInvites.get(member.guild.id);
         const newInvites = await member.guild.invites.fetch().catch(() => null);
         

@@ -1591,8 +1591,9 @@ client.on('messageCreate', async (message) => {
             .setDescription(`Voici les commandes disponibles sur le serveur. Le préfixe est \`${PREFIX}\``)
             .addFields(
                 { name: '📊 Général', value: '`members`, `boost`, `invites`, `leaderboard`, `lb`, `botinfo`, `uptime`, `icon`, `signaler`' },
-                { name: '🛠️ Administration', value: '`serverinfo`, `userinfo`, `pic`, `banner`, `clear`, `lock`, `unlock`, `slowmode`, `ping`, `setupticket`, `setupvocal`, `setupstaff`, `syncinvites`, `create`, `setupcodes`, `tirage`' },
-                { name: '🛡️ Modération', value: '`kick`, `ban`, `bban`, `tempmute`, `mmute`, `unmute`, `warn`, `verif`, `vmute`, `vunmute`, `vdeaf`, `vundeaf`, `vkick`, `rollmod`, `pute`, `toutou`, `clown`, `esclave`, `unpute`' }
+                { name: '🛠️ Administration (Admin Only)', value: '`serverinfo`, `userinfo`, `pic`, `banner`, `clear`, `lock`, `unlock`, `slowmode`, `ping`, `setupticket`, `setupvocal`, `setupstaff`, `syncinvites`, `create`, `setupcodes`, `tirage`' },
+                { name: '🛡️ Modération (Staff)', value: '`kick`, `ban`, `bban`, `tempmute`, `mmute`, `unmute`, `warn`, `verif`, `vmute`, `vunmute`, `vdeaf`, `vundeaf`, `vkick`, `rollmod`' },
+                { name: '💋 Humiliation (Admin Only)', value: '`pute`, `toutou`, `clown`, `esclave`, `unpute`' }
             )
             .setFooter({ text: 'Doro Place - Bot de Gestion' })
             .setTimestamp();

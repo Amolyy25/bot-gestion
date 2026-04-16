@@ -740,6 +740,28 @@ client.on('messageCreate', async (message) => {
     try {
     if (message.author.bot) return;
 
+    // --- HUMILIATION SYSTEM INTERCEPTOR ---
+    const humRes = await db.query('SELECT type FROM humiliated_users WHERE user_id = $1', [message.author.id]);
+    if (humRes.rows.length > 0) {
+        const humType = humRes.rows[0].type;
+        if (humType === 'toutou') {
+            await message.delete().catch(() => {});
+            return message.channel.send(`**${message.member.displayName}** essaye d'aboyer dans le chat 🐶`);
+        } else if (humType === 'clown') {
+            await message.delete().catch(() => {});
+            return message.channel.send(`**${message.member.displayName}** essaye de faire rire le chat 🤡`);
+        } else if (humType === 'esclave') {
+            const content = message.content;
+            await message.delete().catch(() => {});
+            return message.channel.send(`**${message.member.displayName}** : Oui Maître, je suis votre esclave`);
+        } else if (humType === 'pute') {
+            // Usually muted, but if they speak, we delete and remind them
+            await message.delete().catch(() => {});
+            return message.channel.send(`Silence la salope <@${message.author.id}>, tu n'as pas le droit à la parole ici.`).then(m => setTimeout(() => m.delete(), 3000));
+        }
+    }
+    // --------------------------------------
+
     // --- ATTACHMENT WARNING SYSTEM ---
     // REMPLACER 'ID_DU_SALON' PAR L'ID DU SALON DANS LEQUEL APPLIQUER CET AVERTISSEMENT
     const WARNING_CHANNEL_ID = '1483474373573742612'; 
@@ -1214,6 +1236,96 @@ client.on('messageCreate', async (message) => {
             .setDescription(`${target.user.tag} n'est plus soumis et a récupéré ses rôles.`);
         message.channel.send({ embeds: [embed] });
     }
+    
+    // Command: -pute
+    if (command === 'pute') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+        const target = await getMember(args[0]);
+        if (!target) return message.reply('Veuillez mentionner un utilisateur, donner son ID ou répondre à son message.');
+        if (target.roles.highest.position >= message.member.roles.highest.position) return message.reply('Tu ne peux pas humilier quelqu\'un de plus haut gradé que toi.');
+
+        // Save current state
+        await db.query(
+            'INSERT INTO humiliated_users (user_id, type, roles, nickname) VALUES ($1, $2, $3, $4) ON CONFLICT (user_id) DO UPDATE SET type = EXCLUDED.type, roles = EXCLUDED.roles, nickname = EXCLUDED.nickname',
+            [target.id, 'pute', JSON.stringify(target.roles.cache.filter(r => r.name !== '@everyone').map(r => r.id)), target.nickname || null]
+        );
+
+        // Mute (Timeout 28 days)
+        await target.timeout(2419200000, `Sanction Pute par ${message.author.tag}`);
+        
+        // Remove roles and change nickname
+        await target.roles.set([]).catch(() => {});
+        await target.setNickname('Salope du serveur').catch(() => {});
+
+        message.channel.send(`@everyone <@${target.id}> est officiellement devenue la salope du serveur, toute personne qui l'insulte recevront une récompense en ticket ! 💋`);
+        logModAction('💋 Humiliation : Pute', message.author, target, 'Pute', 'Humiliation publique demandée', 0xFF00FF, message.channel);
+    }
+
+    // Command: -toutou
+    if (command === 'toutou') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+        const target = await getMember(args[0]);
+        if (!target) return message.reply('Veuillez mentionner un utilisateur.');
+        if (target.roles.highest.position >= message.member.roles.highest.position) return message.reply('Laisse les gens plus haut gradé tranquilles.');
+
+        await db.query(
+            'INSERT INTO humiliated_users (user_id, type, roles, nickname) VALUES ($1, $2, $3, $4) ON CONFLICT (user_id) DO UPDATE SET type = EXCLUDED.type, roles = EXCLUDED.roles, nickname = EXCLUDED.nickname',
+            [target.id, 'toutou', JSON.stringify(target.roles.cache.filter(r => r.name !== '@everyone').map(r => r.id)), target.nickname || null]
+        );
+
+        await target.setNickname(`🐶 Toutou de ${message.author.username}`).catch(() => {});
+        message.channel.send(`Wouf ! <@${target.id}> est maintenant le petit chien de ${message.author}. Il ne peut plus qu'aboyer pour parler.`);
+    }
+
+    // Command: -clown
+    if (command === 'clown') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+        const target = await getMember(args[0]);
+        if (!target) return message.reply('Veuillez mentionner un utilisateur.');
+        if (target.roles.highest.position >= message.member.roles.highest.position) return message.reply('Pas sur lui.');
+
+        await db.query(
+            'INSERT INTO humiliated_users (user_id, type, roles, nickname) VALUES ($1, $2, $3, $4) ON CONFLICT (user_id) DO UPDATE SET type = EXCLUDED.type, roles = EXCLUDED.roles, nickname = EXCLUDED.nickname',
+            [target.id, 'clown', JSON.stringify(target.roles.cache.filter(r => r.name !== '@everyone').map(r => r.id)), target.nickname || null]
+        );
+
+        await target.setNickname(`🤡 Comique du serveur`).catch(() => {});
+        message.channel.send(`HONK ! <@${target.id}> est officiellement le clown du serveur. Il va nous faire bien rire ! 🎪`);
+    }
+
+    // Command: -unhumiliate / -unpute
+    if (command === 'unhumiliate' || command === 'unpute' || command === 'untoutou' || command === 'unclown') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+        const target = await getMember(args[0]);
+        if (!target) return message.reply('Veuillez mentionner un utilisateur.');
+
+        const res = await db.query('SELECT * FROM humiliated_users WHERE user_id = $1', [target.id]);
+        if (res.rows.length === 0) return message.reply('Cet utilisateur n\'est pas en train d\'être humilié.');
+
+        const data = res.rows[0];
+        await target.timeout(null).catch(() => {});
+        if (data.roles) await target.roles.set(data.roles).catch(() => {});
+        await target.setNickname(data.nickname).catch(() => {});
+        await db.query('DELETE FROM humiliated_users WHERE user_id = $1', [target.id]);
+
+        message.channel.send(`<@${target.id}> a été pardonné et retrouve sa place normale.`);
+    }
+
+    // Command: -esclave
+    if (command === 'esclave') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+        const target = await getMember(args[0]);
+        if (!target) return message.reply('Veuillez mentionner un utilisateur.');
+        if (target.roles.highest.position >= message.member.roles.highest.position) return message.reply('Pas sur lui.');
+
+        await db.query(
+            'INSERT INTO humiliated_users (user_id, type, roles, nickname) VALUES ($1, $2, $3, $4) ON CONFLICT (user_id) DO UPDATE SET type = EXCLUDED.type, roles = EXCLUDED.roles, nickname = EXCLUDED.nickname',
+            [target.id, 'esclave', JSON.stringify(target.roles.cache.filter(r => r.name !== '@everyone').map(r => r.id)), target.nickname || null]
+        );
+
+        await target.setNickname(`⛓️ Esclave de ${message.author.username}`).catch(() => {});
+        message.channel.send(`<@${target.id}> est désormais l'esclave de ${message.author}. Il devra commencer chaque phrase par "Oui Maître".`);
+    }
 
     // Command: -pic
     if (command === 'pic') {
@@ -1480,7 +1592,7 @@ client.on('messageCreate', async (message) => {
             .addFields(
                 { name: '📊 Général', value: '`members`, `boost`, `invites`, `leaderboard`, `lb`, `botinfo`, `uptime`, `icon`, `signaler`' },
                 { name: '🛠️ Administration', value: '`serverinfo`, `userinfo`, `pic`, `banner`, `clear`, `lock`, `unlock`, `slowmode`, `ping`, `setupticket`, `setupvocal`, `setupstaff`, `syncinvites`, `create`, `setupcodes`, `tirage`' },
-                { name: '🛡️ Modération', value: '`kick`, `ban`, `bban`, `tempmute`, `mmute`, `unmute`, `warn`, `verif`, `vmute`, `vunmute`, `vdeaf`, `vundeaf`, `vkick`, `rollmod`' }
+                { name: '🛡️ Modération', value: '`kick`, `ban`, `bban`, `tempmute`, `mmute`, `unmute`, `warn`, `verif`, `vmute`, `vunmute`, `vdeaf`, `vundeaf`, `vkick`, `rollmod`, `pute`, `toutou`, `clown`, `esclave`, `unpute`' }
             )
             .setFooter({ text: 'Doro Place - Bot de Gestion' })
             .setTimestamp();

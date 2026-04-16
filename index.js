@@ -13,6 +13,7 @@ const {
     StringSelectMenuOptionBuilder,
     ChannelSelectMenuBuilder,
     RoleSelectMenuBuilder,
+    UserSelectMenuBuilder,
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,

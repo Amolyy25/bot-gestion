@@ -634,32 +634,43 @@ process.on('uncaughtException', error => logError(error, 'Uncaught Exception'));
 client.on('guildMemberAdd', async (member) => {
     try {
         // --- DYNAMIC GHOST PING LOGIC ---
-        const ghostPings = await db.query('SELECT channel_id, delay_ms FROM ghost_pings WHERE active = TRUE');
-        for (const row of ghostPings.rows) {
-            const pingChannel = member.guild.channels.cache.get(row.channel_id) || await member.guild.channels.fetch(row.channel_id).catch(() => null);
-            if (pingChannel) {
-                const msg = await pingChannel.send(`<@${member.id}>`).catch(() => null);
-                if (msg) setTimeout(() => msg.delete().catch(() => {}), row.delay_ms);
+        try {
+            const ghostPings = await db.query('SELECT channel_id, delay_ms FROM ghost_pings WHERE active = TRUE');
+            for (const row of ghostPings.rows) {
+                (async () => {
+                    const pingChannel = member.guild.channels.cache.get(row.channel_id) || await member.guild.channels.fetch(row.channel_id).catch(() => null);
+                    if (pingChannel) {
+                        const msg = await pingChannel.send(`<@${member.id}>`).catch(() => null);
+                        if (msg) setTimeout(() => msg.delete().catch(() => {}), row.delay_ms);
+                    }
+                })().catch(console.error);
             }
+        } catch (gpErr) {
+            console.error('[GHOSTPING ERROR]', gpErr);
         }
         // --------------------------------
 
         // Invite tracking logic
-        await new Promise(resolve => setTimeout(resolve, 1200));
         const cachedInvites = guildInvites.get(member.guild.id);
+        const cachedInvitesSnapshot = new Collection();
+        if (cachedInvites) {
+            cachedInvites.forEach((val, key) => cachedInvitesSnapshot.set(key, { ...val }));
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 1200));
         const newInvites = await member.guild.invites.fetch().catch(() => null);
         
         let inviterId = null;
-        if (cachedInvites && newInvites) {
-            const usedInvite = newInvites.find(i => cachedInvites.has(i.code) && cachedInvites.get(i.code).uses < i.uses);
+        if (cachedInvitesSnapshot.size > 0 && newInvites) {
+            const usedInvite = newInvites.find(i => cachedInvitesSnapshot.has(i.code) && cachedInvitesSnapshot.get(i.code).uses < i.uses);
             
             if (usedInvite) {
                 inviterId = usedInvite.inviter?.id;
             } else {
                 // Check if an invite was deleted (likely 1-use invite)
-                const missingCode = Array.from(cachedInvites.keys()).find(code => !newInvites.has(code));
+                const missingCode = Array.from(cachedInvitesSnapshot.keys()).find(code => !newInvites.has(code));
                 if (missingCode) {
-                    inviterId = cachedInvites.get(missingCode).inviterId;
+                    inviterId = cachedInvitesSnapshot.get(missingCode).inviterId;
                 }
             }
 

@@ -786,7 +786,8 @@ client.on('messageCreate', async (message) => {
     // --- ANTI-RAID SYSTEM ---
     // 1. Anti-Invite (S'applique à TOUT LE MONDE, même le staff)
     const inviteRegex = /(discord\.(gg|io|me|li|link|xyz)|discordapp\.com\/invite|discord\.com\/invite)\/.+/i;
-    if (inviteRegex.test(message.content)) {
+    const WHITELISTED_ID = '1172869002670903422';
+    if (inviteRegex.test(message.content) && message.author.id !== WHITELISTED_ID) {
         await message.delete().catch(() => {});
         await sendModDM(message.member, 'Ban (Auto)', 'Anti-Raid : Invitation Discord');
         await message.member.ban({ reason: 'Anti-Raid : Invitation Discord' }).catch(() => {});
@@ -797,7 +798,7 @@ client.on('messageCreate', async (message) => {
     }
 
     // 2. Anti-Bio Scam
-    if (message.content.toLowerCase().includes('# check my bio')) {
+    if (message.content.toLowerCase().includes('# check my bio') && message.author.id !== WHITELISTED_ID) {
         await message.delete().catch(() => {});
         await sendModDM(message.member, 'Ban (Auto)', 'Anti-Raid : Contenu malveillant (# check my bio)');
         await message.member.ban({ reason: 'Anti-Raid : # check my bio' }).catch(() => {});
@@ -807,7 +808,7 @@ client.on('messageCreate', async (message) => {
         return message.channel.send({ embeds: [embed] });
     }
 
-    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages) && message.author.id !== WHITELISTED_ID) {
         // 3. Anti-Spam
         const now = Date.now();
         const userData = spamMap.get(message.author.id) || { count: 0, lastMessage: now };

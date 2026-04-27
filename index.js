@@ -560,25 +560,29 @@ const createTicket = async (guild, user, type, fromQueue = false) => {
     } else if (type === 'verif') {
         category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toUpperCase() === 'VÉRIFICATION');
         if (!category) {
+            const categoryOverwrites = [{ id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] }];
+            if (guild.roles.cache.has(STAFF_ROLE_ID)) {
+                categoryOverwrites.push({ id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel] });
+            }
+
             category = await guild.channels.create({
                 name: 'VÉRIFICATION',
                 type: ChannelType.GuildCategory,
-                permissionOverwrites: [
-                    { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-                    { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel] }
-                ]
+                permissionOverwrites: categoryOverwrites
             });
         }
     } else if (type === 'unban') {
         category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toUpperCase() === 'UNBAN');
         if (!category) {
+            const unbanOverwrites = [{ id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] }];
+            if (guild.roles.cache.has(STAFF_ROLE_ID)) {
+                unbanOverwrites.push({ id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel] });
+            }
+
             category = await guild.channels.create({
                 name: 'UNBAN',
                 type: ChannelType.GuildCategory,
-                permissionOverwrites: [
-                    { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-                    { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel] }
-                ]
+                permissionOverwrites: unbanOverwrites
             }).catch(() => null);
         }
     } else {
@@ -591,15 +595,20 @@ const createTicket = async (guild, user, type, fromQueue = false) => {
         }
     }
 
+    const overwrites = [
+        { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+        { id: user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.AttachFiles] }
+    ];
+
+    if (guild.roles.cache.has(STAFF_ROLE_ID)) {
+        overwrites.push({ id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageMessages, PermissionsBitField.Flags.ReadMessageHistory] });
+    }
+
     const channel = await guild.channels.create({
         name: `ticket-${user.username}`,
         type: ChannelType.GuildText,
         parent: category ? category.id : null,
-        permissionOverwrites: [
-            { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-            { id: user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.AttachFiles] },
-            { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageMessages, PermissionsBitField.Flags.ReadMessageHistory] }
-        ],
+        permissionOverwrites: overwrites,
     });
 
     const embed = new EmbedBuilder()
@@ -617,7 +626,8 @@ const createTicket = async (guild, user, type, fromQueue = false) => {
         new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer le ticket').setStyle(ButtonStyle.Danger)
     );
 
-    await channel.send({ content: `<@&${STAFF_ROLE_ID}>`, embeds: [embed], components: [row] });
+    const staffPing = guild.roles.cache.has(STAFF_ROLE_ID) ? `<@&${STAFF_ROLE_ID}>` : '@Staff';
+    await channel.send({ content: staffPing, embeds: [embed], components: [row] });
 
     if (fromQueue) {
         try {
@@ -2950,7 +2960,8 @@ client.on('interactionCreate', async (interaction) => {
                 }
 
                 await createTicket(guild, interaction.user, type);
-                return await interaction.reply({ content: `Votre ticket a été créé dans la catégorie **${type === 'vip' ? 'VIP' : 'Général'}**.`, flags: [MessageFlags.Ephemeral] });
+                const categoryLabel = type === 'vip' ? 'VIP' : (type === 'unban' ? 'Unban' : 'Général');
+                return await interaction.reply({ content: `Votre ticket a été créé dans la catégorie **${categoryLabel}**.`, flags: [MessageFlags.Ephemeral] });
             }
 
             if (interaction.customId === 'claim_ticket') {

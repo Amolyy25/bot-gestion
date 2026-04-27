@@ -412,7 +412,7 @@ const sendModDM = async (target, action, reason, includeUnbanInfo = false) => {
             });
         }
 
-        await user.send({ embeds: [embed] }).catch(() => {});
+        await user.send({ content: `${UNBAN_SERVER_INVITE}`, embeds: [embed] }).catch(() => {});
     } catch (err) {
         // Ignore errors if DMs are closed
     }

@@ -368,6 +368,7 @@ client.on('inviteDelete', (invite) => {
 const LOG_CHANNEL_ID = '1483480300112842874';
 const MOD_LOG_CHANNEL_ID = '1484873046459158688';
 const GUILD_ID = process.env.GUILD_ID || '1483226900016009427';
+const UNBAN_SERVER_INVITE = 'https://discord.gg/sw5MkXSgTK'; // À REMPLACER PAR LE LIEN RÉEL
 
 const logToDiscord = async (title, description, fields = [], color = 0xFFFFFF, imageUrl = null) => {
     try {
@@ -391,7 +392,7 @@ const logToDiscord = async (title, description, fields = [], color = 0xFFFFFF, i
     }
 };
 
-const sendModDM = async (target, action, reason) => {
+const sendModDM = async (target, action, reason, includeUnbanInfo = false) => {
     try {
         const user = target.user || target;
         const guild = target.guild || client.guilds.cache.get(GUILD_ID);
@@ -403,6 +404,14 @@ const sendModDM = async (target, action, reason) => {
                 { name: 'Action', value: action, inline: true },
                 { name: 'Raison', value: reason || 'Aucune raison spécifiée', inline: true }
             );
+        
+        if (includeUnbanInfo) {
+            embed.addFields({ 
+                name: '🔓 Demande de Débannissement', 
+                value: `Nous suspectons que votre compte s'est fait hack et que vous n'êtes pas à l'origine de ça.\nPour demander un débannissement, rejoignez ce serveur et faites un ticket :\n${UNBAN_SERVER_INVITE}`
+            });
+        }
+
         await user.send({ embeds: [embed] }).catch(() => {});
     } catch (err) {
         // Ignore errors if DMs are closed
@@ -560,6 +569,18 @@ const createTicket = async (guild, user, type, fromQueue = false) => {
                 ]
             });
         }
+    } else if (type === 'unban') {
+        category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toUpperCase() === 'UNBAN');
+        if (!category) {
+            category = await guild.channels.create({
+                name: 'UNBAN',
+                type: ChannelType.GuildCategory,
+                permissionOverwrites: [
+                    { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                    { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel] }
+                ]
+            }).catch(() => null);
+        }
     } else {
         category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toUpperCase() === CATEGORY_GENERAL_NAME);
         if (!category) {
@@ -584,7 +605,11 @@ const createTicket = async (guild, user, type, fromQueue = false) => {
     const embed = new EmbedBuilder()
         .setColor(0xFFFFFF)
         .setTitle(`Ticket ${type.toUpperCase()}`)
-        .setDescription(type === 'verif' ? `Bonjour ${user}, veuillez envoyer une photo de votre pièce d'identité pour vérifier que vous avez bien +18 ans.` : `Bonjour ${user}, un membre du staff va s'occuper de vous dans ce salon de ${type.toLowerCase()}.`)
+        .setDescription(
+            type === 'verif' ? `Bonjour ${user}, veuillez envoyer une photo de votre pièce d'identité pour vérifier que vous avez bien +18 ans.` :
+            type === 'unban' ? `Bonjour ${user}, vous avez ouvert un ticket de débannissement. Veuillez expliquer pourquoi vous devriez être débanni.` :
+            `Bonjour ${user}, un membre du staff va s'occuper de vous dans ce salon de ${type.toLowerCase()}.`
+        )
         .setFooter({ text: 'Tickets - Doro Place' });
 
     const row = new ActionRowBuilder().addComponents(
@@ -789,7 +814,7 @@ client.on('messageCreate', async (message) => {
     const WHITELISTED_ID = '1172869002670903422';
     if (inviteRegex.test(message.content) && message.author.id !== WHITELISTED_ID) {
         await message.delete().catch(() => {});
-        await sendModDM(message.member, 'Ban (Auto)', 'Anti-Raid : Invitation Discord');
+        await sendModDM(message.member, 'Ban (Auto)', 'Anti-Raid : Invitation Discord', true);
         await message.member.ban({ reason: 'Anti-Raid : Invitation Discord' }).catch(() => {});
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
@@ -800,7 +825,7 @@ client.on('messageCreate', async (message) => {
     // 2. Anti-Bio Scam
     if (message.content.toLowerCase().includes('# check my bio') && message.author.id !== WHITELISTED_ID) {
         await message.delete().catch(() => {});
-        await sendModDM(message.member, 'Ban (Auto)', 'Anti-Raid : Contenu malveillant (# check my bio)');
+        await sendModDM(message.member, 'Ban (Auto)', 'Anti-Raid : Contenu malveillant (# check my bio)', true);
         await message.member.ban({ reason: 'Anti-Raid : # check my bio' }).catch(() => {});
         const embed = new EmbedBuilder()
             .setColor(0xFFFFFF)
@@ -2097,6 +2122,98 @@ client.on('messageCreate', async (message) => {
         message.reply({ embeds: [embed] });
     }
 
+    // Command: -unbanall
+    if (command === 'unbanall') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
+        try {
+            const bans = await message.guild.bans.fetch();
+            if (bans.size === 0) return message.reply('Aucun utilisateur n\'est banni de ce serveur.');
+
+            const embed = new EmbedBuilder()
+                .setColor(0xFFFFFF)
+                .setDescription(`⏳ Début du débannissement massif de **${bans.size}** membres...`);
+            const statusMsg = await message.channel.send({ embeds: [embed] });
+
+            const invites = await message.guild.invites.fetch();
+            let invite = invites.filter(i => i.maxAge === 0).first();
+            if (!invite) {
+                const channel = message.guild.channels.cache.find(c => c.isTextBased() && c.permissionsFor(message.guild.members.me).has(PermissionsBitField.Flags.CreateInstantInvite));
+                if (channel) invite = await channel.createInvite({ maxAge: 0 });
+            }
+
+            const inviteUrl = invite ? invite.url : "Lien d'invitation non disponible";
+            let success = 0;
+            let failed = 0;
+
+            for (const ban of bans.values()) {
+                try {
+                    await message.guild.members.unban(ban.user.id);
+                    success++;
+                    
+                    // Attempt to DM the user
+                    try {
+                        await ban.user.send(`vous venez d'être unban de doro place\n${inviteUrl}`);
+                    } catch (dmErr) {
+                        // Ignore DM errors (DMs closed)
+                    }
+
+                    // Anti-rate limit every 5 unbans
+                    if (success % 5 === 0) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        await statusMsg.edit({ 
+                            embeds: [new EmbedBuilder()
+                                .setColor(0xFFFFFF)
+                                .setDescription(`⏳ Débannissement en cours... (${success}/${bans.size})`)] 
+                        }).catch(() => {});
+                    }
+                } catch (unbanErr) {
+                    failed++;
+                }
+            }
+
+            const finalEmbed = new EmbedBuilder()
+                .setColor(0x00FF00)
+                .setTitle('✅ Débannissement Massif Terminé')
+                .setDescription(`Le processus est terminé.`)
+                .addFields(
+                    { name: '👤 Total de bannis', value: `${bans.size}`, inline: true },
+                    { name: '🔓 Débannis avec succès', value: `${success}`, inline: true },
+                    { name: '❌ Échecs', value: `${failed}`, inline: true }
+                )
+                .setTimestamp();
+
+            await statusMsg.edit({ embeds: [finalEmbed] });
+            logModAction('🔓 Unban Massif', message.author, { id: 'N/A', tag: 'Tout le serveur' }, 'Unban All', `Total: ${bans.size}`, 0x00FF00, message.channel);
+            
+        } catch (err) {
+            logError(err, 'Command: -unbanall');
+            message.reply('Une erreur est survenue lors du débannissement massif.');
+        }
+    }
+
+    // Command: -setupunban
+    if (command === 'setupunban') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+        
+        const embed = new EmbedBuilder()
+            .setColor(0xFFFFFF)
+            .setTitle('🔓 Demande de Débannissement')
+            .setDescription('Si vous avez été banni injustement ou que votre compte a été piraté, vous pouvez introduire une demande de débannissement ici.\n\nAppuyez sur le bouton ci-dessous pour ouvrir un ticket.')
+            .setFooter({ text: 'Doro Place - Système Unban' });
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('open_ticket_unban')
+                .setLabel('Créer un ticket Unban')
+                .setStyle(ButtonStyle.Primary)
+                .setEmoji('🔓')
+        );
+
+        await message.channel.send({ embeds: [embed], components: [row] });
+        await message.delete().catch(() => {});
+    }
+
     // Command: -unban
     if (command === 'unban') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.BanMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;
@@ -2104,14 +2221,21 @@ client.on('messageCreate', async (message) => {
         if (!userId) return message.reply('Usage: -unban <user_id>');
 
         try {
-            await message.guild.members.unban(userId);
+            // Si on est sur le serveur d'unban, on débannit sur le serveur principal
+            const targetGuild = (message.guild.id !== GUILD_ID) ? client.guilds.cache.get(GUILD_ID) : message.guild;
+            
+            if (!targetGuild) return message.reply('Serveur principal introuvable.');
+
+            await targetGuild.members.unban(userId);
+            
             const embed = new EmbedBuilder()
-                .setColor(0xFFFFFF)
-                .setDescription(`L'utilisateur avec l'ID \`${userId}\` a été débanni.`);
+                .setColor(0x00FF00)
+                .setDescription(`L'utilisateur avec l'ID \`${userId}\` a été débanni sur **${targetGuild.name}**.`);
             message.channel.send({ embeds: [embed] });
-            logModAction('🔓 Unban', message.author, { id: userId, tag: `ID: ${userId}` }, 'Débannissement', 'Manuel (-unban)', 0x00FF00, message.channel);
+            
+            logModAction('🔓 Unban', message.author, { id: userId, tag: `ID: ${userId}` }, 'Débannissement', `Manuel (-unban) sur ${targetGuild.name}`, 0x00FF00, message.channel);
         } catch (err) {
-            message.reply('Impossible de débannir cet ID. Vérifiez qu\'il est bien banni.');
+            message.reply('Impossible de débannir cet ID. Vérifiez qu\'il est bien banni sur le serveur cible.');
         }
     }
 
@@ -2807,7 +2931,7 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             if (interaction.customId.startsWith('open_ticket_')) {
-                const type = interaction.customId.split('_')[2]; // vip or general
+                const type = interaction.customId.split('_')[2]; // vip, general or unban
                 const guild = interaction.guild;
                 
                 const currentCount = getTicketCount(guild);

@@ -1142,6 +1142,27 @@ client.on('messageCreate', async (message) => {
         logModAction('🧹 Nettoyage', message.author, null, 'Clear', `${amount} messages`, 0x00FFFF, message.channel);
     }
 
+    // Command: -renew
+    if (command === 'renew') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+        const channel = message.channel;
+        try {
+            const position = channel.position;
+            const newChannel = await channel.clone({ reason: `Renew par ${message.author.tag}` });
+            await channel.delete(`Renew par ${message.author.tag}`);
+            await newChannel.setPosition(position);
+
+            const embed = new EmbedBuilder()
+                .setColor(0xFFFFFF)
+                .setDescription(`♻️ Salon recréé par ${message.author} (nom et permissions conservés).`);
+            await newChannel.send({ embeds: [embed] });
+            logModAction('♻️ Renew', message.author, null, 'Renew', `Salon #${newChannel.name} recréé`, 0xFFFFFF, newChannel);
+        } catch (err) {
+            logError(err, 'Command: -renew');
+            message.reply('Erreur lors du renouvellement du salon.').catch(() => {});
+        }
+    }
+
     // Command: -tempmute
     if (command === 'tempmute' || command === 'mute') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.roles.cache.has(STAFF_ROLE_ID)) return;

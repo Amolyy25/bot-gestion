@@ -1661,7 +1661,7 @@ client.on('messageCreate', async (message) => {
             .setDescription(`Voici les commandes disponibles sur le serveur. Le préfixe est \`${PREFIX}\``)
             .addFields(
                 { name: '📊 Général', value: '`members`, `boost`, `invites`, `leaderboard`, `lb`, `botinfo`, `uptime`, `icon`, `signaler`' },
-                { name: '🛠️ Administration (Admin Only)', value: '`serverinfo`, `userinfo`, `pic`, `banner`, `clear`, `lock`, `unlock`, `slowmode`, `ping`, `setupticket`, `setupvocal`, `setupstaff`, `syncinvites`, `create`, `setupcodes`, `tirage`, `dmall`' },
+                { name: '🛠️ Administration (Admin Only)', value: '`serverinfo`, `userinfo`, `pic`, `banner`, `clear`, `lock`, `unlock`, `close`, `slowmode`, `ping`, `setupticket`, `setupvocal`, `setupstaff`, `syncinvites`, `create`, `setupcodes`, `tirage`, `dmall`' },
                 { name: '🛡️ Modération (Staff)', value: '`kick`, `ban`, `bban`, `tempmute`, `mmute`, `unmute`, `warn`, `verif`, `vmute`, `vunmute`, `vdeaf`, `vundeaf`, `vkick`, `rollmod`' },
                 { name: '💋 Humiliation (Admin Only)', value: '`pute`, `toutou`, `clown`, `esclave`, `unpute`' }
             )
@@ -1688,6 +1688,104 @@ client.on('messageCreate', async (message) => {
             .setColor(0xFFFFFF)
             .setDescription('Ce salon a été déverrouillé.');
         message.channel.send({ embeds: [embed] });
+    }
+
+    // Command: -close
+    if (command === 'close') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
+        if (args[0] !== 'confirm') {
+            const warn = new EmbedBuilder()
+                .setColor(0xFFFFFF)
+                .setTitle('⚠️ Fermeture du serveur')
+                .setDescription(`Cette commande va **verrouiller tous les salons** du serveur et créer un salon de fermeture.\n\nPour confirmer, tapez \`${PREFIX}close confirm\`.`);
+            return message.channel.send({ embeds: [warn] });
+        }
+
+        try {
+            const everyone = message.guild.roles.everyone;
+
+            // Salon de fermeture (créé avant le verrouillage pour rester lisible)
+            const closeCategory = await message.guild.channels.create({
+                name: '🔒 FERMETURE',
+                type: ChannelType.GuildCategory,
+                position: 0
+            });
+
+            const closeChannel = await message.guild.channels.create({
+                name: '📕・fermeture',
+                type: ChannelType.GuildText,
+                parent: closeCategory.id,
+                permissionOverwrites: [
+                    {
+                        id: everyone.id,
+                        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.ReadMessageHistory],
+                        deny: [PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.AddReactions]
+                    }
+                ]
+            });
+
+            const status = await message.channel.send({ embeds: [
+                new EmbedBuilder().setColor(0xFFFFFF).setDescription('🔒 Fermeture du serveur en cours...')
+            ] });
+
+            const lockDeny = {
+                SendMessages: false,
+                AddReactions: false,
+                SendMessagesInThreads: false,
+                CreatePublicThreads: false,
+                CreatePrivateThreads: false,
+                Connect: false,
+                Speak: false
+            };
+
+            const channels = await message.guild.channels.fetch();
+            let locked = 0;
+            let failed = 0;
+
+            for (const channel of channels.values()) {
+                if (!channel) continue;
+                if (channel.id === closeChannel.id || channel.id === closeCategory.id) continue;
+
+                try {
+                    await channel.permissionOverwrites.edit(everyone, lockDeny, { reason: `Fermeture du serveur par ${message.author.tag}` });
+                    locked++;
+                } catch {
+                    failed++;
+                }
+            }
+
+            const farewell = new EmbedBuilder()
+                .setColor(0xFFFFFF)
+                .setTitle('📕 Fin du projet')
+                .setDescription([
+                    'Le serveur ferme définitivement ses portes.',
+                    '',
+                    '**Merci à tous.** Merci pour votre présence, votre énergie et tous les moments partagés ici.',
+                    'Ce projet n\'aurait jamais été ce qu\'il est devenu sans vous.',
+                    '',
+                    'Tous les salons ont été verrouillés. C\'est la fin du projet, mais rien n\'effacera ce qu\'on y a construit.',
+                    '',
+                    '❤️ Prenez soin de vous.'
+                ].join('\n'))
+                .setFooter({ text: 'Doro Place - Merci pour tout' })
+                .setTimestamp();
+
+            if (message.guild.iconURL()) farewell.setThumbnail(message.guild.iconURL({ size: 512 }));
+
+            await closeChannel.send({ embeds: [farewell] });
+
+            await status.edit({ embeds: [
+                new EmbedBuilder()
+                    .setColor(0xFFFFFF)
+                    .setDescription(`🔒 Serveur fermé : **${locked}** salons verrouillés${failed ? `, **${failed}** échec(s)` : ''}.\nMessage de fermeture envoyé dans ${closeChannel}.`)
+            ] }).catch(() => {});
+
+            logModAction('🔒 Fermeture du serveur', message.author, null, 'Close', `${locked} salons verrouillés${failed ? `, ${failed} échec(s)` : ''}`, 0x000000, closeChannel);
+        } catch (err) {
+            logError(err, 'Command: -close');
+            message.reply('Erreur lors de la fermeture du serveur.').catch(() => {});
+        }
     }
 
     // Command: -ping
